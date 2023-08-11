@@ -2,6 +2,12 @@
 name = "bsky_tui"
 version = "0.0.1"
 edition = "2018"
+authors = ["Keisuke Toyota <hm.pudding0715@gmail.com>"]
+repository = "https://github.com/ksk001100/bsky_tui"
+keywords = ["bluesky", "bsky", "tui"]
+license-file = "LICENSE"
+readme = "README.md"
+description = "Bluesky TUI Client"
 
 [dependencies]
 crossterm = "0.27"
