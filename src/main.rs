@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use seahorse::{App as SeahorseApp, Context};
 
-// Rename tui_template to package name
 use bsky_tui::app::App;
 use bsky_tui::io::handler::IoAsyncHandler;
 use bsky_tui::io::IoEvent;

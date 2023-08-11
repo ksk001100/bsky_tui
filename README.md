@@ -9,6 +9,12 @@ cd bsky_tui
 cargo install --path .
 ```
 
+or
+
+```bash
+cargo install bsky_tui
+```
+
 ## Usage
 
 ```bash
