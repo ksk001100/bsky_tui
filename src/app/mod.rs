@@ -46,11 +46,11 @@ impl App {
                     self.state.set_mode(state::Mode::Help);
                     AppReturn::Continue
                 }
-                Key::Down | Key::Char('j') => {
+                Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                     self.state.move_tl_scroll_down();
                     AppReturn::Continue
                 }
-                Key::Up | Key::Char('k') => {
+                Key::Up | Key::Char('k') | Key::Ctrl('p') => {
                     self.state.move_tl_scroll_up();
                     AppReturn::Continue
                 }

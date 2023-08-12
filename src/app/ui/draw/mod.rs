@@ -80,12 +80,12 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("j, Down"),
+            Cell::from("j, Ctrl+n, Down"),
             Cell::from("Select next post"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("k, Up"),
+            Cell::from("k, Ctrl+p, Up"),
             Cell::from("Select previous post"),
         ]),
         Row::new(vec![
