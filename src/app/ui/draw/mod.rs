@@ -1,7 +1,7 @@
 use crate::app::state::AppState;
 use atrium_api::records::Record;
 use ratatui::layout::{Alignment, Constraint};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, ListItem, Padding, Paragraph, Row, Table,
@@ -21,6 +21,17 @@ pub fn title<'a>() -> Paragraph<'a> {
 pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
     Paragraph::new(format!("Mode: {} (type `?` for help)", state.get_mode()))
         .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(Block::default().style(Style::default().fg(Color::White)))
+}
+
+pub fn loading<'a>() -> Paragraph<'a> {
+    Paragraph::new("Loading...")
+        .style(
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .alignment(Alignment::Center)
         .block(Block::default().style(Style::default().fg(Color::White)))
 }

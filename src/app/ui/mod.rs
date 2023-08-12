@@ -28,6 +28,13 @@ where
         .select(Some(app.state.get_tl_list_position()));
     f.render_stateful_widget(body, body_chunks[0], &mut app.state.get_tl_list_state());
 
+    if app.state.get_feed().is_none() {
+        let popup = draw::loading();
+        let area = layout::popup(60, 20, size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+    }
+
     if app.state.is_help_mode() {
         let popup = draw::help();
         let area = layout::popup(60, 20, size);
