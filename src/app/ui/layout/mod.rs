@@ -18,8 +18,8 @@ pub fn header(rect: Rect) -> Rc<[Rect]> {
 
 pub fn body(rect: Rect) -> Rc<[Rect]> {
     Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(100)].as_ref())
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(5), Constraint::Percentage(95)].as_ref())
         .split(rect)
 }
 

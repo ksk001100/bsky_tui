@@ -1,6 +1,7 @@
 use atrium_api::agent::{AtpAgent, BaseClient};
 use atrium_api::app::bsky::feed::get_timeline;
 use atrium_api::app::bsky::feed::post;
+use atrium_api::app::bsky::notification::list_notifications;
 use atrium_api::com::atproto::repo::create_record;
 use atrium_api::com::atproto::server::create_session;
 use atrium_api::records;
@@ -74,4 +75,29 @@ pub async fn send_post(agent: &Agent, text: String) -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+pub async fn notifications(agent: &Agent) -> Result<list_notifications::Output> {
+    let notifications = agent
+        .api
+        .app
+        .bsky
+        .notification
+        .list_notifications(list_notifications::Parameters {
+            cursor: None,
+            limit: None,
+            seen_at: None,
+        })
+        .await?;
+
+    Ok(notifications)
+}
+
+pub fn get_url(handle: String, uri: String) -> Option<String> {
+    if let Some(id) = uri.split('/').last() {
+        let url = format!("https://bsky.app/profile/{}/post/{}", handle, id);
+        Some(url.clone())
+    } else {
+        None
+    }
 }

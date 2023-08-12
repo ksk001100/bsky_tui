@@ -35,7 +35,12 @@ impl App {
             state::Mode::Normal => match key {
                 Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
                 Key::Char('r') => {
-                    self.dispatch(IoEvent::LoadFeed).await;
+                    match self.state.get_tab() {
+                        state::Tab::Timeline => self.dispatch(IoEvent::LoadFeed).await,
+                        state::Tab::Notifications => {
+                            self.dispatch(IoEvent::LoadNotifications).await
+                        }
+                    }
                     AppReturn::Continue
                 }
                 Key::Char('n') => {
@@ -47,10 +52,17 @@ impl App {
                     AppReturn::Continue
                 }
                 Key::Down | Key::Char('j') | Key::Ctrl('n') => {
-                    self.state.move_tl_scroll_down();
+                    match self.state.get_tab() {
+                        state::Tab::Timeline => self.state.move_tl_scroll_down(),
+                        state::Tab::Notifications => self.state.move_notifications_scroll_down(),
+                    }
                     AppReturn::Continue
                 }
                 Key::Up | Key::Char('k') | Key::Ctrl('p') => {
+                    match self.state.get_tab() {
+                        state::Tab::Timeline => self.state.move_tl_scroll_up(),
+                        state::Tab::Notifications => self.state.move_notifications_scroll_up(),
+                    }
                     self.state.move_tl_scroll_up();
                     AppReturn::Continue
                 }
@@ -60,6 +72,16 @@ impl App {
                             let handle = feed.post.author.handle;
                             let url = format!("https://bsky.app/profile/{}/post/{}", handle, id);
                             let _ = webbrowser::open(&url).is_ok();
+                        }
+                    }
+                    AppReturn::Continue
+                }
+                Key::Tab => {
+                    self.state.set_next_tab();
+                    match self.state.get_tab() {
+                        state::Tab::Timeline => self.dispatch(IoEvent::LoadFeed).await,
+                        state::Tab::Notifications => {
+                            self.dispatch(IoEvent::LoadNotifications).await
                         }
                     }
                     AppReturn::Continue
@@ -122,8 +144,8 @@ impl App {
         self.is_loading
     }
 
-    pub fn initialized(&mut self, agent: bsky::Agent) {
-        self.state = AppState::initialized(agent);
+    pub fn initialized(&mut self, agent: bsky::Agent, handle: String) {
+        self.state = AppState::initialized(agent, handle);
     }
 
     pub fn loaded(&mut self) {

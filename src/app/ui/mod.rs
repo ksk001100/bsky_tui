@@ -1,6 +1,7 @@
 mod draw;
 mod layout;
 
+use crate::app::state::Tab;
 use crate::app::App;
 use ratatui::backend::Backend;
 use ratatui::widgets::Clear;
@@ -22,18 +23,41 @@ where
     let mode = draw::mode(app.state());
     f.render_widget(mode, header_chunks[1]);
 
-    let body = draw::body(app.state());
-    app.state
-        .get_tl_list_state()
-        .select(Some(app.state.get_tl_list_position()));
-    f.render_stateful_widget(body, body_chunks[0], &mut app.state.get_tl_list_state());
+    let tabs = draw::tabs(app.state());
+    f.render_widget(tabs, body_chunks[0]);
 
-    if app.state.get_feed().is_none() {
-        let popup = draw::loading();
-        let area = layout::popup(60, 20, size);
-        f.render_widget(Clear, area);
-        f.render_widget(popup, area);
-    }
+    match app.state.get_tab() {
+        Tab::Timeline => {
+            let body = draw::timeline(app.state());
+            app.state
+                .get_tl_list_state()
+                .select(Some(app.state.get_tl_list_position()));
+            f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
+            if app.state.get_feeds().is_none() {
+                let popup = draw::loading();
+                let area = layout::popup(60, 20, size);
+                f.render_widget(Clear, area);
+                f.render_widget(popup, area);
+            }
+        }
+        Tab::Notifications => {
+            let body = draw::notifications(app.state());
+            app.state
+                .get_notifications_list_state()
+                .select(Some(app.state.get_notifications_list_position()));
+            f.render_stateful_widget(
+                body,
+                body_chunks[1],
+                &mut app.state.get_notifications_list_state(),
+            );
+            if app.state.get_notifications().is_none() {
+                let popup = draw::loading();
+                let area = layout::popup(60, 20, size);
+                f.render_widget(Clear, area);
+                f.render_widget(popup, area);
+            }
+        }
+    };
 
     if app.state.is_help_mode() {
         let popup = draw::help();

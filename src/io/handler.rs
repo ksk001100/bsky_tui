@@ -20,6 +20,7 @@ impl IoAsyncHandler {
             IoEvent::Initialize => self.do_initialize().await,
             IoEvent::LoadFeed => self.do_load_timeline().await,
             IoEvent::SendPost => self.do_send_post().await,
+            IoEvent::LoadNotifications => self.do_load_notifications().await,
         };
 
         let mut app = self.app.lock().await;
@@ -30,7 +31,8 @@ impl IoAsyncHandler {
         {
             let mut app = self.app.lock().await;
             let agent = bsky::agent_with_session().await?;
-            app.initialized(agent);
+            let session = bsky::session(&agent).await?;
+            app.initialized(agent, session.handle);
         }
         self.do_load_timeline().await?;
 
@@ -41,7 +43,7 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         let agent = app.state.get_agent().unwrap();
         let timeline = bsky::timeline(&agent).await?;
-        app.state.set_feed(timeline.feed);
+        app.state.set_feeds(timeline.feed);
 
         Ok(())
     }
@@ -55,6 +57,15 @@ impl IoAsyncHandler {
             app.state.set_input_text("".to_string());
         }
         self.do_load_timeline().await?;
+
+        Ok(())
+    }
+
+    async fn do_load_notifications(&mut self) -> Result<()> {
+        let mut app = self.app.lock().await;
+        let agent = app.state.get_agent().unwrap();
+        let notifications = bsky::notifications(&agent).await?;
+        app.state.set_notifications(notifications.notifications);
 
         Ok(())
     }

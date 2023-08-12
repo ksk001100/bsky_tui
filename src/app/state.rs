@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::bsky;
 use atrium_api::app::bsky::feed::defs::FeedViewPost;
+use atrium_api::app::bsky::notification::list_notifications::Notification;
 use ratatui::widgets::ListState;
 
 #[derive(Clone)]
@@ -25,35 +26,69 @@ impl Display for Mode {
 }
 
 #[derive(Clone)]
+pub enum Tab {
+    Timeline,
+    Notifications,
+}
+
+impl Display for Tab {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let str = match self {
+            Tab::Timeline => "Timeline",
+            Tab::Notifications => "Notifications",
+        };
+        write!(f, "{}", str)
+    }
+}
+
+#[derive(Clone)]
 pub enum AppState {
     Init,
     Initialized {
         agent: Arc<bsky::Agent>,
-        feed: Option<Vec<FeedViewPost>>,
+        feeds: Option<Vec<FeedViewPost>>,
+        notifications: Option<Vec<Notification>>,
         input_text: String,
         input_cursor_position: usize,
         tl_list_state: ListState,
         tl_list_position: usize,
+        notifications_list_state: ListState,
+        notifications_list_position: usize,
+        handle: Option<String>,
         mode: Mode,
+        tab: Tab,
     },
 }
 
 impl AppState {
-    pub fn initialized(agent: bsky::Agent) -> Self {
+    pub fn initialized(agent: bsky::Agent, handle: String) -> Self {
         let agent = Arc::new(agent);
         Self::Initialized {
             agent,
-            feed: None,
+            feeds: None,
+            notifications: None,
             input_text: String::new(),
             input_cursor_position: 0,
             tl_list_state: ListState::default().with_selected(Some(0)),
             tl_list_position: 0,
+            notifications_list_state: ListState::default().with_selected(Some(0)),
+            notifications_list_position: 0,
+            handle: Some(handle),
             mode: Mode::Normal,
+            tab: Tab::Timeline,
         }
     }
 
     pub fn is_initialized(&self) -> bool {
         matches!(self, &Self::Initialized { .. })
+    }
+
+    pub fn get_handle(&self) -> Option<String> {
+        if let Self::Initialized { handle, .. } = self {
+            handle.clone()
+        } else {
+            None
+        }
     }
 
     pub fn get_agent(&self) -> Option<Arc<bsky::Agent>> {
@@ -108,7 +143,7 @@ impl AppState {
             //     *input_cursor_position = len - *input_cursor_position + 1;
             // }
 
-            // TODO: カーソル位置の調整がめんどいので後回し
+            // TODO: マルチバイト文字のカーソル位置調整がめんどいので後回し
             input_text.push(c);
             *input_cursor_position = input_text.len();
 
@@ -149,11 +184,11 @@ impl AppState {
         if let Self::Initialized {
             tl_list_position,
             tl_list_state,
-            feed: Some(feed),
+            feeds: Some(feeds),
             ..
         } = self
         {
-            if *tl_list_position < feed.len() - 1 {
+            if *tl_list_position < feeds.len() - 1 {
                 *tl_list_position += 1;
                 tl_list_state.select(Some(*tl_list_position));
             }
@@ -166,6 +201,47 @@ impl AppState {
         } = self
         {
             *tl_list_position
+        } else {
+            0
+        }
+    }
+
+    pub fn move_notifications_scroll_up(&mut self) {
+        if let Self::Initialized {
+            notifications_list_position,
+            notifications_list_state,
+            ..
+        } = self
+        {
+            if *notifications_list_position > 0 {
+                *notifications_list_position -= 1;
+                notifications_list_state.select(Some(*notifications_list_position));
+            }
+        }
+    }
+
+    pub fn move_notifications_scroll_down(&mut self) {
+        if let Self::Initialized {
+            notifications_list_position,
+            notifications_list_state,
+            notifications: Some(notifications),
+            ..
+        } = self
+        {
+            if *notifications_list_position < notifications.len() - 1 {
+                *notifications_list_position += 1;
+                notifications_list_state.select(Some(*notifications_list_position));
+            }
+        }
+    }
+
+    pub fn get_notifications_list_position(&self) -> usize {
+        if let Self::Initialized {
+            notifications_list_position,
+            ..
+        } = self
+        {
+            *notifications_list_position
         } else {
             0
         }
@@ -196,15 +272,15 @@ impl AppState {
         }
     }
 
-    pub fn set_feed(&mut self, f: Vec<FeedViewPost>) {
-        if let Self::Initialized { feed, .. } = self {
-            *feed = Some(f);
+    pub fn set_feeds(&mut self, f: Vec<FeedViewPost>) {
+        if let Self::Initialized { feeds, .. } = self {
+            *feeds = Some(f);
         }
     }
 
-    pub fn get_feed(&self) -> Option<Vec<FeedViewPost>> {
-        if let Self::Initialized { feed, .. } = self {
-            feed.clone()
+    pub fn get_feeds(&self) -> Option<Vec<FeedViewPost>> {
+        if let Self::Initialized { feeds, .. } = self {
+            feeds.clone()
         } else {
             None
         }
@@ -268,14 +344,59 @@ impl AppState {
         }
     }
 
+    pub fn get_notifications_list_state(&self) -> ListState {
+        if let Self::Initialized {
+            notifications_list_state,
+            ..
+        } = self
+        {
+            notifications_list_state.clone()
+        } else {
+            ListState::default()
+        }
+    }
+
     pub fn get_current_feed(&self) -> Option<FeedViewPost> {
         if let Self::Initialized {
-            feed,
+            feeds,
             tl_list_position,
             ..
         } = self
         {
-            feed.clone().and_then(|f| f.get(*tl_list_position).cloned())
+            feeds
+                .clone()
+                .and_then(|f| f.get(*tl_list_position).cloned())
+        } else {
+            None
+        }
+    }
+
+    pub fn get_tab(&self) -> Tab {
+        if let Self::Initialized { tab, .. } = self {
+            tab.clone()
+        } else {
+            Tab::Timeline
+        }
+    }
+
+    pub fn set_next_tab(&mut self) {
+        if let Self::Initialized { tab, .. } = self {
+            *tab = match tab {
+                Tab::Timeline => Tab::Notifications,
+                Tab::Notifications => Tab::Timeline,
+            }
+        }
+    }
+
+    pub fn set_notifications(&mut self, n: Vec<Notification>) {
+        if let Self::Initialized { notifications, .. } = self {
+            *notifications = Some(n);
+        }
+    }
+
+    pub fn get_notifications(&self) -> Option<Vec<Notification>> {
+        if let Self::Initialized { notifications, .. } = self {
+            notifications.clone()
         } else {
             None
         }

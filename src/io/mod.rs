@@ -4,5 +4,6 @@ pub mod handler;
 pub enum IoEvent {
     Initialize,
     LoadFeed,
+    LoadNotifications,
     SendPost,
 }
