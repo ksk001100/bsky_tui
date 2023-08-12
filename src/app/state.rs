@@ -46,7 +46,7 @@ impl AppState {
             feed: None,
             input_text: String::new(),
             input_cursor_position: 0,
-            tl_list_state: ListState::default(),
+            tl_list_state: ListState::default().with_selected(Some(0)),
             tl_list_position: 0,
             mode: Mode::Normal,
         }

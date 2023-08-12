@@ -37,14 +37,14 @@ where
 
     if app.state.is_help_mode() {
         let popup = draw::help();
-        let area = layout::popup(60, 20, size);
+        let area = layout::popup(60, 40, size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
     }
 
     if app.state.is_post_mode() {
         let popup = draw::post_input(app.state());
-        let area = layout::popup(60, 10, size);
+        let area = layout::popup(60, 20, size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
         // f.set_cursor(
