@@ -267,6 +267,19 @@ impl AppState {
             ListState::default()
         }
     }
+
+    pub fn get_current_feed(&self) -> Option<FeedViewPost> {
+        if let Self::Initialized {
+            feed,
+            tl_list_position,
+            ..
+        } = self
+        {
+            feed.clone().and_then(|f| f.get(*tl_list_position).cloned())
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for AppState {

@@ -88,6 +88,11 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from("k, Up"),
             Cell::from("Select previous post"),
         ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Enter"),
+            Cell::from("Selected post open in browser"),
+        ]),
         // Post mode
         Row::new(vec![
             Cell::from("Post Mode"),

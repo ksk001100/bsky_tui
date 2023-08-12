@@ -18,3 +18,4 @@ ratatui = { version = "0.22", features = ["all-widgets"] }
 atrium-api = "0.4"
 atrium-xrpc = "0.3"
 chrono = "0.4"
+webbrowser = "0.8"

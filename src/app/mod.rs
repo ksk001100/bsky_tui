@@ -54,6 +54,16 @@ impl App {
                     self.state.move_tl_scroll_up();
                     AppReturn::Continue
                 }
+                Key::Enter => {
+                    if let Some(feed) = self.state.get_current_feed() {
+                        if let Some(id) = feed.post.uri.split('/').last() {
+                            let handle = feed.post.author.handle;
+                            let url = format!("https://bsky.app/profile/{}/post/{}", handle, id);
+                            let _ = webbrowser::open(&url).is_ok();
+                        }
+                    }
+                    AppReturn::Continue
+                }
                 _ => AppReturn::Continue,
             },
             state::Mode::Post => match key {
