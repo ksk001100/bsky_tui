@@ -64,7 +64,6 @@ impl App {
                         state::Tab::Timeline => self.state.move_tl_scroll_up(),
                         state::Tab::Notifications => self.state.move_notifications_scroll_up(),
                     }
-                    self.state.move_tl_scroll_up();
                     AppReturn::Continue
                 }
                 Key::Enter => {
