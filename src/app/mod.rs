@@ -2,6 +2,7 @@ pub mod state;
 pub mod ui;
 
 use self::state::AppState;
+use crate::app::state::Tab;
 use crate::bsky;
 use crate::inputs::key::Key;
 use crate::io::IoEvent;
@@ -67,11 +68,14 @@ impl App {
                     AppReturn::Continue
                 }
                 Key::Enter => {
-                    if let Some(feed) = self.state.get_current_feed() {
-                        if let Some(id) = feed.post.uri.split('/').last() {
-                            let handle = feed.post.author.handle;
-                            let url = format!("https://bsky.app/profile/{}/post/{}", handle, id);
-                            let _ = webbrowser::open(&url).is_ok();
+                    if self.state.get_tab() == Tab::Timeline {
+                        if let Some(feed) = self.state.get_current_feed() {
+                            if let Some(id) = feed.post.uri.split('/').last() {
+                                let handle = feed.post.author.handle;
+                                let url =
+                                    format!("https://bsky.app/profile/{}/post/{}", handle, id);
+                                let _ = webbrowser::open(&url).is_ok();
+                            }
                         }
                     }
                     AppReturn::Continue

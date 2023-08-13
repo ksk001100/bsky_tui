@@ -7,7 +7,7 @@ use atrium_api::app::bsky::feed::defs::FeedViewPost;
 use atrium_api::app::bsky::notification::list_notifications::Notification;
 use ratatui::widgets::ListState;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Mode {
     Normal,
     Post,
@@ -25,7 +25,7 @@ impl Display for Mode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Tab {
     Timeline,
     Notifications,
