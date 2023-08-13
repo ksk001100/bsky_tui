@@ -342,7 +342,7 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
                 .style(Style::default().fg(Color::White))
                 .borders(Borders::ALL)
                 .title("New post")
-                .padding(Padding::new(1, 1, 2, 1)),
+                .padding(Padding::new(1, 1, 1, 1)),
         )
 }
 
