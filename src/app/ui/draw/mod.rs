@@ -117,6 +117,18 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from("Enter"),
             Cell::from("Selected post open in browser"),
         ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Timeline"),
+            Cell::from("Ctrl+r"),
+            Cell::from("Repost selected post (unrepost if already reposted)"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Timeline"),
+            Cell::from("Ctrl+l"),
+            Cell::from("Like selected post (unlike if already liked)"),
+        ]),
         // Post mode
         Row::new(vec![
             Cell::from("Post Mode"),

@@ -48,6 +48,18 @@ impl App {
                     self.state.set_mode(state::Mode::Post);
                     AppReturn::Continue
                 }
+                Key::Ctrl('r') => {
+                    if self.state.get_tab() == Tab::Timeline {
+                        self.dispatch(IoEvent::Repost).await;
+                    }
+                    AppReturn::Continue
+                }
+                Key::Ctrl('l') => {
+                    if self.state.get_tab() == Tab::Timeline {
+                        self.dispatch(IoEvent::Like).await;
+                    }
+                    AppReturn::Continue
+                }
                 Key::Char('?') => {
                     self.state.set_mode(state::Mode::Help);
                     AppReturn::Continue

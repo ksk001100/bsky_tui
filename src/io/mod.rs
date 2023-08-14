@@ -6,4 +6,6 @@ pub enum IoEvent {
     LoadFeed,
     LoadNotifications,
     SendPost,
+    Like,
+    Repost,
 }

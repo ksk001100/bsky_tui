@@ -21,6 +21,8 @@ impl IoAsyncHandler {
             IoEvent::LoadFeed => self.do_load_timeline().await,
             IoEvent::SendPost => self.do_send_post().await,
             IoEvent::LoadNotifications => self.do_load_notifications().await,
+            IoEvent::Like => self.do_like().await,
+            IoEvent::Repost => self.do_repost().await,
         };
 
         let mut app = self.app.lock().await;
@@ -66,6 +68,30 @@ impl IoAsyncHandler {
         let agent = app.state.get_agent().unwrap();
         let notifications = bsky::notifications(&agent).await?;
         app.state.set_notifications(notifications.notifications);
+
+        Ok(())
+    }
+
+    async fn do_like(&mut self) -> Result<()> {
+        {
+            let app = self.app.lock().await;
+            let agent = app.state.get_agent().unwrap();
+            let current_feed = app.state.get_current_feed().unwrap();
+            bsky::toggle_like(&agent, current_feed).await?;
+        }
+        self.do_load_timeline().await?;
+
+        Ok(())
+    }
+
+    async fn do_repost(&mut self) -> Result<()> {
+        {
+            let app = self.app.lock().await;
+            let agent = app.state.get_agent().unwrap();
+            let current_feed = app.state.get_current_feed().unwrap();
+            bsky::toggle_repost(&agent, current_feed).await?;
+        }
+        self.do_load_timeline().await?;
 
         Ok(())
     }
