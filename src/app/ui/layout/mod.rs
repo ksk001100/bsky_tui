@@ -74,3 +74,29 @@ pub fn input_popup(rect: Rect) -> Rect {
         )
         .split(popup_layout[1])[1]
 }
+
+pub fn reply_popup(rect: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage(50),
+                Constraint::Length(10),
+                Constraint::Percentage(50),
+            ]
+            .as_ref(),
+        )
+        .split(rect);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(
+            [
+                Constraint::Percentage(20),
+                Constraint::Percentage(60),
+                Constraint::Percentage(20),
+            ]
+            .as_ref(),
+        )
+        .split(popup_layout[1])[1]
+}

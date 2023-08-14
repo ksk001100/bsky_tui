@@ -2,6 +2,7 @@ use atrium_api::agent::{AtpAgent, BaseClient};
 use atrium_api::app::bsky::feed::defs::FeedViewPost;
 use atrium_api::app::bsky::feed::get_timeline;
 use atrium_api::app::bsky::feed::post;
+use atrium_api::app::bsky::feed::post::ReplyRef;
 use atrium_api::app::bsky::notification::list_notifications;
 use atrium_api::com::atproto::repo::{self, create_record, delete_record, list_records};
 use atrium_api::com::atproto::server::create_session;
@@ -50,7 +51,7 @@ pub async fn timeline(agent: &Agent) -> Result<get_timeline::Output> {
 
     Ok(timeline)
 }
-pub async fn send_post(agent: &Agent, text: String) -> Result<()> {
+pub async fn send_post(agent: &Agent, text: String, reply: Option<ReplyRef>) -> Result<()> {
     let session = session(agent).await?;
     agent
         .api
@@ -65,7 +66,7 @@ pub async fn send_post(agent: &Agent, text: String) -> Result<()> {
                 entities: None,
                 facets: None,
                 langs: None,
-                reply: None,
+                reply,
                 text,
             })),
             repo: session.did,

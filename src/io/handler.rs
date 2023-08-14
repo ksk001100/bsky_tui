@@ -3,6 +3,8 @@ use crate::app::state::Mode;
 use crate::app::App;
 use crate::bsky;
 
+use atrium_api::app::bsky::feed::post::ReplyRef;
+use atrium_api::com::atproto::repo::strong_ref;
 use eyre::Result;
 use std::sync::Arc;
 
@@ -23,6 +25,7 @@ impl IoAsyncHandler {
             IoEvent::LoadNotifications => self.do_load_notifications().await,
             IoEvent::Like => self.do_like().await,
             IoEvent::Repost => self.do_repost().await,
+            IoEvent::Reply => self.do_reply().await,
         };
 
         let mut app = self.app.lock().await;
@@ -54,7 +57,12 @@ impl IoAsyncHandler {
         {
             let mut app = self.app.lock().await;
             let agent = app.state.get_agent().unwrap();
-            bsky::send_post(&agent, app.state.get_input_text().unwrap_or("".to_string())).await?;
+            bsky::send_post(
+                &agent,
+                app.state.get_input_text().unwrap_or("".to_string()),
+                None,
+            )
+            .await?;
             app.state.set_mode(Mode::Normal);
             app.state.set_input_text("".to_string());
         }
@@ -90,6 +98,35 @@ impl IoAsyncHandler {
             let agent = app.state.get_agent().unwrap();
             let current_feed = app.state.get_current_feed().unwrap();
             bsky::toggle_repost(&agent, current_feed).await?;
+        }
+        self.do_load_timeline().await?;
+
+        Ok(())
+    }
+
+    async fn do_reply(&mut self) -> Result<()> {
+        {
+            let mut app = self.app.lock().await;
+            let agent = app.state.get_agent().unwrap();
+            let current_feed = app.state.get_current_feed().unwrap();
+            let reply = ReplyRef {
+                root: strong_ref::Main {
+                    cid: current_feed.post.cid.clone(),
+                    uri: current_feed.post.uri.clone(),
+                },
+                parent: strong_ref::Main {
+                    cid: current_feed.post.cid.clone(),
+                    uri: current_feed.post.uri.clone(),
+                },
+            };
+            bsky::send_post(
+                &agent,
+                app.state.get_input_text().unwrap_or("".to_string()),
+                Some(reply),
+            )
+            .await?;
+            app.state.set_mode(Mode::Normal);
+            app.state.set_input_text("".to_string());
         }
         self.do_load_timeline().await?;
 

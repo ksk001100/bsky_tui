@@ -8,4 +8,5 @@ pub enum IoEvent {
     SendPost,
     Like,
     Repost,
+    Reply,
 }

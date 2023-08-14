@@ -48,6 +48,10 @@ impl App {
                     self.state.set_mode(state::Mode::Post);
                     AppReturn::Continue
                 }
+                Key::Char('N') => {
+                    self.state.set_mode(state::Mode::Reply);
+                    AppReturn::Continue
+                }
                 Key::Ctrl('r') => {
                     if self.state.get_tab() == Tab::Timeline {
                         self.dispatch(IoEvent::Repost).await;
@@ -106,10 +110,39 @@ impl App {
             state::Mode::Post => match key {
                 Key::Esc => {
                     self.state.set_mode(state::Mode::Normal);
+                    self.state.set_input_text(String::new());
                     AppReturn::Continue
                 }
                 Key::Enter => {
                     self.dispatch(IoEvent::SendPost).await;
+                    AppReturn::Continue
+                }
+                Key::Left | Key::Ctrl('b') => {
+                    self.state.move_input_cursor_left();
+                    AppReturn::Continue
+                }
+                Key::Right | Key::Ctrl('f') => {
+                    self.state.move_input_cursor_right();
+                    AppReturn::Continue
+                }
+                Key::Char(c) => {
+                    self.state.insert_input_text(c);
+                    AppReturn::Continue
+                }
+                Key::Backspace | Key::Ctrl('h') => {
+                    self.state.remove_input_text();
+                    AppReturn::Continue
+                }
+                _ => AppReturn::Continue,
+            },
+            state::Mode::Reply => match key {
+                Key::Esc => {
+                    self.state.set_mode(state::Mode::Normal);
+                    self.state.set_input_text(String::new());
+                    AppReturn::Continue
+                }
+                Key::Enter => {
+                    self.dispatch(IoEvent::Reply).await;
                     AppReturn::Continue
                 }
                 Key::Left | Key::Ctrl('b') => {

@@ -76,4 +76,15 @@ where
         //     area.y + 3,
         // );
     }
+
+    if app.state.is_reply_mode() {
+        let popup = draw::reply_input(app.state());
+        let area = layout::reply_popup(size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+        // f.set_cursor(
+        //     area.x + 2 + app.state.get_input_cursor_position() as u16,
+        //     area.y + 3,
+        // );
+    }
 }

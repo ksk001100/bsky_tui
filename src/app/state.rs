@@ -11,6 +11,7 @@ use ratatui::widgets::ListState;
 pub enum Mode {
     Normal,
     Post,
+    Reply,
     Help,
 }
 
@@ -19,6 +20,7 @@ impl Display for Mode {
         let str = match self {
             Mode::Normal => "Normal",
             Mode::Post => "Post",
+            Mode::Reply => "Reply",
             Mode::Help => "Help",
         };
         write!(f, "{}", str)
@@ -311,6 +313,14 @@ impl AppState {
     pub fn is_post_mode(&self) -> bool {
         if let Self::Initialized { mode, .. } = self {
             matches!(mode, Mode::Post)
+        } else {
+            false
+        }
+    }
+
+    pub fn is_reply_mode(&self) -> bool {
+        if let Self::Initialized { mode, .. } = self {
+            matches!(mode, Mode::Reply)
         } else {
             false
         }

@@ -91,13 +91,13 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from(""),
             Cell::from("Timeline/Notifications"),
             Cell::from("n"),
-            Cell::from("Show new post popup"),
+            Cell::from("New post popup"),
         ]),
         Row::new(vec![
             Cell::from(""),
             Cell::from("Timeline/Notifications"),
-            Cell::from("n"),
-            Cell::from("Show new post popup"),
+            Cell::from("N"),
+            Cell::from("Reply selected post popup"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -131,7 +131,7 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         // Post mode
         Row::new(vec![
-            Cell::from("Post Mode"),
+            Cell::from("Post Mode/Reply Mode"),
             Cell::from(""),
             Cell::from("Esc"),
             Cell::from("Return to normal mode"),
@@ -356,6 +356,61 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
                 .title("New post")
                 .padding(Padding::new(1, 1, 1, 1)),
         )
+}
+
+pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
+    let text = state.get_input_text().unwrap_or_else(|| "".into());
+    let current_feed = state.get_current_feed();
+
+    if current_feed.is_none() {
+        return Paragraph::new("Error...");
+    }
+
+    let current_feed = current_feed.unwrap();
+    let display_name = current_feed
+        .post
+        .author
+        .display_name
+        .clone()
+        .unwrap_or_else(|| "".into());
+    let handle = current_feed.post.author.handle.clone();
+    let parent_text = match current_feed.post.record {
+        Record::AppBskyFeedPost(post) => post.text.clone(),
+        _ => "".into(),
+    };
+    let reply_count = current_feed.post.reply_count.unwrap_or(0);
+    let repost_count = current_feed.post.repost_count.unwrap_or(0);
+    let like_count = current_feed.post.like_count.unwrap_or(0);
+
+    Paragraph::new(vec![
+        Line::from(format!("{} @{}", display_name, handle)),
+        Line::from(parent_text),
+        Line::from(vec![
+            Span::styled(
+                format!("↩ {}", reply_count),
+                Style::default().fg(Color::Gray),
+            ),
+            Span::styled(
+                format!("   🔁 {}", repost_count),
+                Style::default().fg(Color::Green),
+            ),
+            Span::styled(
+                format!("   ❤ {}", like_count),
+                Style::default().fg(Color::Red),
+            ),
+        ]),
+        Line::from(""),
+        Line::from(text),
+    ])
+    .style(Style::default().fg(Color::White).bg(Color::Black))
+    .alignment(Alignment::Left)
+    .block(
+        Block::default()
+            .style(Style::default().fg(Color::White))
+            .borders(Borders::ALL)
+            .title("Reply")
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
