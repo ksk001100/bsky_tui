@@ -33,57 +33,42 @@ impl App {
 
     pub async fn do_action(&mut self, key: Key) -> AppReturn {
         match self.state.get_mode() {
-            state::Mode::Normal => match key {
-                Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
-                Key::Char('r') => {
-                    match self.state.get_tab() {
-                        state::Tab::Timeline => self.dispatch(IoEvent::LoadFeed).await,
-                        state::Tab::Notifications => {
-                            self.dispatch(IoEvent::LoadNotifications).await
-                        }
+            state::Mode::Normal => match self.state.get_tab() {
+                Tab::Timeline => match key {
+                    Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
+                    Key::Char('r') => {
+                        self.dispatch(IoEvent::LoadFeed).await;
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                Key::Char('n') => {
-                    self.state.set_mode(state::Mode::Post);
-                    AppReturn::Continue
-                }
-                Key::Char('N') => {
-                    self.state.set_mode(state::Mode::Reply);
-                    AppReturn::Continue
-                }
-                Key::Ctrl('r') => {
-                    if self.state.get_tab() == Tab::Timeline {
+                    Key::Char('n') => {
+                        self.state.set_mode(state::Mode::Post);
+                        AppReturn::Continue
+                    }
+                    Key::Char('N') => {
+                        self.state.set_mode(state::Mode::Reply);
+                        AppReturn::Continue
+                    }
+                    Key::Ctrl('r') => {
                         self.dispatch(IoEvent::Repost).await;
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                Key::Ctrl('l') => {
-                    if self.state.get_tab() == Tab::Timeline {
+                    Key::Ctrl('l') => {
                         self.dispatch(IoEvent::Like).await;
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                Key::Char('?') => {
-                    self.state.set_mode(state::Mode::Help);
-                    AppReturn::Continue
-                }
-                Key::Down | Key::Char('j') | Key::Ctrl('n') => {
-                    match self.state.get_tab() {
-                        state::Tab::Timeline => self.state.move_tl_scroll_down(),
-                        state::Tab::Notifications => self.state.move_notifications_scroll_down(),
+                    Key::Char('?') => {
+                        self.state.set_mode(state::Mode::Help);
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                Key::Up | Key::Char('k') | Key::Ctrl('p') => {
-                    match self.state.get_tab() {
-                        state::Tab::Timeline => self.state.move_tl_scroll_up(),
-                        state::Tab::Notifications => self.state.move_notifications_scroll_up(),
+                    Key::Down | Key::Char('j') | Key::Ctrl('n') => {
+                        self.state.move_tl_scroll_down();
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                Key::Enter => {
-                    if self.state.get_tab() == Tab::Timeline {
+                    Key::Up | Key::Char('k') | Key::Ctrl('p') => {
+                        self.state.move_tl_scroll_up();
+                        AppReturn::Continue
+                    }
+                    Key::Enter => {
                         if let Some(feed) = self.state.get_current_feed() {
                             if let Some(id) = feed.post.uri.split('/').last() {
                                 let handle = feed.post.author.handle;
@@ -92,20 +77,40 @@ impl App {
                                 let _ = webbrowser::open(&url).is_ok();
                             }
                         }
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                Key::Tab => {
-                    self.state.set_next_tab();
-                    match self.state.get_tab() {
-                        state::Tab::Timeline => self.dispatch(IoEvent::LoadFeed).await,
-                        state::Tab::Notifications => {
-                            self.dispatch(IoEvent::LoadNotifications).await
-                        }
+                    Key::Tab => {
+                        self.state.set_next_tab();
+                        self.dispatch(IoEvent::LoadNotifications).await;
+                        AppReturn::Continue
                     }
-                    AppReturn::Continue
-                }
-                _ => AppReturn::Continue,
+                    _ => AppReturn::Continue,
+                },
+                Tab::Notifications => match key {
+                    Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
+                    Key::Char('r') => {
+                        self.dispatch(IoEvent::LoadNotifications).await;
+                        AppReturn::Continue
+                    }
+                    Key::Char('?') => {
+                        self.state.set_mode(state::Mode::Help);
+                        AppReturn::Continue
+                    }
+                    Key::Down | Key::Char('j') | Key::Ctrl('n') => {
+                        self.state.move_notifications_scroll_down();
+                        AppReturn::Continue
+                    }
+                    Key::Up | Key::Char('k') | Key::Ctrl('p') => {
+                        self.state.move_notifications_scroll_up();
+                        AppReturn::Continue
+                    }
+                    Key::Tab => {
+                        self.state.set_next_tab();
+                        self.dispatch(IoEvent::LoadFeed).await;
+                        AppReturn::Continue
+                    }
+                    _ => AppReturn::Continue,
+                },
             },
             state::Mode::Post => match key {
                 Key::Esc => {

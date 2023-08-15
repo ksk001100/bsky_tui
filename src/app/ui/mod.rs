@@ -1,11 +1,9 @@
 mod draw;
 mod layout;
 
-use crate::app::state::Tab;
-use crate::app::App;
-use ratatui::backend::Backend;
-use ratatui::widgets::Clear;
-use ratatui::Frame;
+use ratatui::{backend::Backend, widgets::Clear, Frame};
+
+use crate::app::{state::Tab, App};
 
 pub fn render<B>(f: &mut Frame<B>, app: &App)
 where

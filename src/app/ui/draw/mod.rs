@@ -1,11 +1,16 @@
-use crate::app::state::{AppState, Tab};
-use crate::bsky;
 use atrium_api::records::Record;
-use ratatui::layout::{Alignment, Constraint};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, Cell, List, ListItem, Padding, Paragraph, Row, Table, Tabs,
+use ratatui::{
+    layout::{Alignment, Constraint},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, Padding, Paragraph, Row, Table, Tabs,
+    },
+};
+
+use crate::{
+    app::state::{AppState, Tab},
+    bsky,
 };
 
 pub fn title<'a>() -> Paragraph<'a> {

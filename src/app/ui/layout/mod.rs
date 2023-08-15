@@ -1,5 +1,6 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use std::rc::Rc;
+
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub fn main(rect: Rect) -> Rc<[Rect]> {
     Layout::default()

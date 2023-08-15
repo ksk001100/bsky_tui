@@ -3,17 +3,16 @@ pub mod bsky;
 pub mod inputs;
 pub mod io;
 
-use crate::app::ui;
-use app::{App, AppReturn};
+use std::{io::stdout, sync::Arc, time::Duration};
+
 use eyre::Result;
-use inputs::events::Events;
-use inputs::InputEvent;
-use io::IoEvent;
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
-use std::io::stdout;
-use std::sync::Arc;
-use std::time::Duration;
+use ratatui::{backend::CrosstermBackend, Terminal};
+
+use crate::{
+    app::{ui, App, AppReturn},
+    inputs::{events::Events, InputEvent},
+    io::IoEvent,
+};
 
 pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>) -> Result<()> {
     let stdout = stdout();

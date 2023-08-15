@@ -1,25 +1,25 @@
-use atrium_api::agent::{AtpAgent, BaseClient};
-use atrium_api::app::bsky::feed::defs::FeedViewPost;
-use atrium_api::app::bsky::feed::get_timeline;
-use atrium_api::app::bsky::feed::post;
-use atrium_api::app::bsky::feed::post::ReplyRef;
-use atrium_api::app::bsky::notification::list_notifications;
-use atrium_api::com::atproto::repo::{self, create_record, delete_record, list_records};
-use atrium_api::com::atproto::server::create_session;
-use atrium_api::records;
+use atrium_api::{
+    agent::{AtpAgent, BaseClient},
+    app::bsky::{
+        feed::{defs, get_timeline, post},
+        notification,
+    },
+    com::atproto::{repo, server},
+    records,
+};
 use atrium_xrpc::client::reqwest::ReqwestClient;
 use chrono::Utc;
 use eyre::Result;
 
 pub type Agent = AtpAgent<BaseClient<ReqwestClient>>;
 
-pub async fn session(agent: &Agent) -> Result<create_session::Output> {
+pub async fn session(agent: &Agent) -> Result<server::create_session::Output> {
     let session = agent
         .api
         .com
         .atproto
         .server
-        .create_session(create_session::Input {
+        .create_session(server::create_session::Input {
             // TODO: use env vars
             identifier: env!("BLUESKY_EMAIL").into(),
             password: env!("BLUESKY_PASSWORD").into(),
@@ -51,14 +51,14 @@ pub async fn timeline(agent: &Agent) -> Result<get_timeline::Output> {
 
     Ok(timeline)
 }
-pub async fn send_post(agent: &Agent, text: String, reply: Option<ReplyRef>) -> Result<()> {
+pub async fn send_post(agent: &Agent, text: String, reply: Option<post::ReplyRef>) -> Result<()> {
     let session = session(agent).await?;
     agent
         .api
         .com
         .atproto
         .repo
-        .create_record(create_record::Input {
+        .create_record(repo::create_record::Input {
             collection: String::from("app.bsky.feed.post"),
             record: records::Record::AppBskyFeedPost(Box::new(post::Record {
                 created_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
@@ -79,13 +79,13 @@ pub async fn send_post(agent: &Agent, text: String, reply: Option<ReplyRef>) -> 
     Ok(())
 }
 
-pub async fn notifications(agent: &Agent) -> Result<list_notifications::Output> {
+pub async fn notifications(agent: &Agent) -> Result<notification::list_notifications::Output> {
     let notifications = agent
         .api
         .app
         .bsky
         .notification
-        .list_notifications(list_notifications::Parameters {
+        .list_notifications(notification::list_notifications::Parameters {
             cursor: None,
             limit: None,
             seen_at: None,
@@ -95,14 +95,14 @@ pub async fn notifications(agent: &Agent) -> Result<list_notifications::Output> 
     Ok(notifications)
 }
 
-pub async fn likes(agent: &Agent) -> Result<list_records::Output> {
+pub async fn likes(agent: &Agent) -> Result<repo::list_records::Output> {
     let session = session(agent).await?;
     let likes = agent
         .api
         .com
         .atproto
         .repo
-        .list_records(list_records::Parameters {
+        .list_records(repo::list_records::Parameters {
             collection: String::from("app.bsky.feed.like"),
             repo: session.did,
             cursor: None,
@@ -116,14 +116,14 @@ pub async fn likes(agent: &Agent) -> Result<list_records::Output> {
     Ok(likes)
 }
 
-pub async fn reposts(agent: &Agent) -> Result<list_records::Output> {
+pub async fn reposts(agent: &Agent) -> Result<repo::list_records::Output> {
     let session = session(agent).await?;
     let reposts = agent
         .api
         .com
         .atproto
         .repo
-        .list_records(list_records::Parameters {
+        .list_records(repo::list_records::Parameters {
             collection: String::from("app.bsky.feed.repost"),
             repo: session.did,
             cursor: None,
@@ -137,7 +137,7 @@ pub async fn reposts(agent: &Agent) -> Result<list_records::Output> {
     Ok(reposts)
 }
 
-pub async fn toggle_like(agent: &Agent, feed: FeedViewPost) -> Result<()> {
+pub async fn toggle_like(agent: &Agent, feed: defs::FeedViewPost) -> Result<()> {
     if let Some(viewer) = feed.post.viewer {
         if let Some(like) = viewer.like {
             unlike(agent, uri_to_rkey(like).unwrap()).await?;
@@ -156,7 +156,7 @@ pub async fn like(agent: &Agent, cid: String, uri: String) -> Result<()> {
         .com
         .atproto
         .repo
-        .create_record(create_record::Input {
+        .create_record(repo::create_record::Input {
             collection: String::from("app.bsky.feed.like"),
             record: records::Record::AppBskyFeedLike(Box::new(
                 atrium_api::app::bsky::feed::like::Record {
@@ -184,7 +184,7 @@ pub async fn unlike(agent: &Agent, rkey: String) -> Result<()> {
         .com
         .atproto
         .repo
-        .delete_record(delete_record::Input {
+        .delete_record(repo::delete_record::Input {
             collection: String::from("app.bsky.feed.like"),
             repo: session.did,
             rkey,
@@ -203,7 +203,7 @@ pub async fn repost(agent: &Agent, cid: String, uri: String) -> Result<()> {
         .com
         .atproto
         .repo
-        .create_record(create_record::Input {
+        .create_record(repo::create_record::Input {
             collection: String::from("app.bsky.feed.repost"),
             record: records::Record::AppBskyFeedRepost(Box::new(
                 atrium_api::app::bsky::feed::repost::Record {
@@ -231,7 +231,7 @@ pub async fn unrepost(agent: &Agent, rkey: String) -> Result<()> {
         .com
         .atproto
         .repo
-        .delete_record(delete_record::Input {
+        .delete_record(repo::delete_record::Input {
             collection: String::from("app.bsky.feed.repost"),
             repo: session.did,
             rkey,
@@ -243,7 +243,7 @@ pub async fn unrepost(agent: &Agent, rkey: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn toggle_repost(agent: &Agent, feed: FeedViewPost) -> Result<()> {
+pub async fn toggle_repost(agent: &Agent, feed: defs::FeedViewPost) -> Result<()> {
     if let Some(viewer) = feed.post.viewer {
         if let Some(repost) = viewer.repost {
             unrepost(agent, uri_to_rkey(repost).unwrap()).await?;
@@ -265,9 +265,5 @@ pub fn get_url(handle: String, uri: String) -> Option<String> {
 }
 
 pub fn uri_to_rkey(uri: String) -> Option<String> {
-    if let Some(rkey) = uri.split('/').last() {
-        Some(rkey.to_string())
-    } else {
-        None
-    }
+    uri.split('/').last().map(|s| s.to_string())
 }

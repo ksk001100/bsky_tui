@@ -1,11 +1,12 @@
 use std::fmt;
-use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::bsky;
-use atrium_api::app::bsky::feed::defs::FeedViewPost;
-use atrium_api::app::bsky::notification::list_notifications::Notification;
+use atrium_api::app::bsky::{
+    feed::defs::FeedViewPost, notification::list_notifications::Notification,
+};
 use ratatui::widgets::ListState;
+
+use crate::bsky;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -15,7 +16,7 @@ pub enum Mode {
     Help,
 }
 
-impl Display for Mode {
+impl fmt::Display for Mode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
             Mode::Normal => "Normal",
@@ -33,7 +34,7 @@ pub enum Tab {
     Notifications,
 }
 
-impl Display for Tab {
+impl fmt::Display for Tab {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
             Tab::Timeline => "Timeline",

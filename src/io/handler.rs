@@ -1,12 +1,12 @@
+use std::sync::Arc;
+
+use atrium_api::{app::bsky::feed::post::ReplyRef, com::atproto::repo::strong_ref};
+use eyre::Result;
+
 use super::IoEvent;
 use crate::app::state::Mode;
 use crate::app::App;
 use crate::bsky;
-
-use atrium_api::app::bsky::feed::post::ReplyRef;
-use atrium_api::com::atproto::repo::strong_ref;
-use eyre::Result;
-use std::sync::Arc;
 
 pub struct IoAsyncHandler {
     app: Arc<tokio::sync::Mutex<App>>,
