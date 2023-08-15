@@ -357,8 +357,10 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                                 format!(" {} ", display_name),
                                 Style::default().fg(Color::White),
                             ),
-                            Span::styled(format!("@{} ", handle), Style::default().fg(Color::Gray)),
-                            Span::styled(datetime, Style::default().fg(Color::Gray)),
+                            Span::styled(
+                                format!("@{} {}", handle, duration_text),
+                                Style::default().fg(Color::Gray),
+                            ),
                         ]),
                         Line::from(reason_subject),
                         Line::from(Span::styled(
