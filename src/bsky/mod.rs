@@ -14,6 +14,8 @@ use eyre::Result;
 pub type Agent = AtpAgent<BaseClient<ReqwestClient>>;
 
 pub async fn session(agent: &Agent) -> Result<server::create_session::Output> {
+    let identifier = std::env::var("BLUESKY_EMAIL").unwrap_or("".into());
+    let password = std::env::var("BLUESKY_PASSWORD").unwrap_or("".into());
     let session = agent
         .api
         .com
@@ -21,8 +23,8 @@ pub async fn session(agent: &Agent) -> Result<server::create_session::Output> {
         .server
         .create_session(server::create_session::Input {
             // TODO: use env vars
-            identifier: env!("BLUESKY_EMAIL").into(),
-            password: env!("BLUESKY_PASSWORD").into(),
+            identifier,
+            password,
         })
         .await?;
 
