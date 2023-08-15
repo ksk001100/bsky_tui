@@ -1,6 +1,8 @@
 # bsky_tui
 Bluesky client for the terminal
 
+![](./assets/splash.png)
+
 ## Installation
 
 ```bash
