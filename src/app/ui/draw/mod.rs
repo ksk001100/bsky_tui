@@ -1,4 +1,5 @@
 use atrium_api::records::Record;
+use chrono::{DateTime, Utc};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Color, Modifier, Style},
@@ -10,7 +11,7 @@ use ratatui::{
 
 use crate::{
     app::state::{AppState, Tab},
-    bsky,
+    bsky, utils,
 };
 
 pub fn title<'a>() -> Paragraph<'a> {
@@ -31,6 +32,13 @@ pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
         .block(Block::default().style(Style::default().fg(Color::White)))
 }
 
+pub fn splash<'a>(text: String) -> Paragraph<'a> {
+    Paragraph::new(text)
+        .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(Block::default())
+}
+
 pub fn loading<'a>() -> Paragraph<'a> {
     Paragraph::new("Loading...")
         .style(
@@ -39,7 +47,7 @@ pub fn loading<'a>() -> Paragraph<'a> {
                 .add_modifier(Modifier::BOLD),
         )
         .alignment(Alignment::Center)
-        .block(Block::default().style(Style::default().fg(Color::White)))
+        .block(Block::default())
 }
 
 pub fn help<'a>() -> Table<'a> {
@@ -180,19 +188,20 @@ pub fn help<'a>() -> Table<'a> {
 }
 
 pub fn timeline<'a>(state: &AppState) -> List<'a> {
-    let feeds = state.get_feeds();
+    let timeline = state.get_timeline();
     let size = crossterm::terminal::size().unwrap();
     let border = "=".repeat((size.0 - 4) as usize);
 
-    let list_items: Vec<ListItem> = match feeds {
+    let list_items: Vec<ListItem> = match timeline {
         Some(feeds) => feeds
             .iter()
             .map(|feed| {
                 let post = feed.post.clone();
-                let text = if let Record::AppBskyFeedPost(r) = post.record {
-                    r.text
+                let (text, created_at) = if let Record::AppBskyFeedPost(r) = post.record {
+                    let c = r.created_at.rsplit('.').last().unwrap();
+                    (r.text, format!("{}+0000", c))
                 } else {
-                    "None".into()
+                    ("".into(), "".into())
                 };
                 let display_name = post
                     .author
@@ -203,13 +212,21 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 let reply_count = post.reply_count.unwrap_or(0);
                 let repost_count = post.repost_count.unwrap_or(0);
                 let like_count = post.like_count.unwrap_or(0);
+                let duration_text =
+                    match DateTime::parse_from_str(&created_at, "%Y-%m-%dT%H:%M:%S%z") {
+                        Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
+                        Err(_) => "".into(),
+                    };
                 let item = vec![
                     Line::from(vec![
                         Span::styled(
                             format!("{} ", display_name),
                             Style::default().fg(Color::White),
                         ),
-                        Span::styled(format!("@{}", handle), Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            format!("@{} {}", handle, duration_text),
+                            Style::default().fg(Color::Gray),
+                        ),
                     ]),
                     Line::from(text),
                     Line::from(vec![
@@ -247,7 +264,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
                     "Timeline ({})",
-                    state.get_feeds().unwrap_or(vec![]).len()
+                    state.get_timeline().unwrap_or(vec![]).len()
                 ))
                 .border_type(BorderType::Plain),
         )
@@ -270,7 +287,10 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     .clone()
                     .unwrap_or_else(|| "".into());
                 let reason = notification.reason.clone();
-                let datetime = notification.indexed_at.clone();
+                let datetime = format!(
+                    "{}+0000",
+                    notification.indexed_at.clone().rsplit('.').last().unwrap()
+                );
                 let reason_icon = match reason.as_str() {
                     "reply" => Span::styled("↩", Style::default().fg(Color::Gray)),
                     "repost" => Span::styled("🔁", Style::default().fg(Color::Green)),
@@ -279,6 +299,12 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     "mention" => Span::styled("🔔", Style::default().fg(Color::Yellow)),
                     "quote" => Span::styled("📣", Style::default().fg(Color::Magenta)),
                     _ => Span::from(""),
+                };
+
+                let duration_text = match DateTime::parse_from_str(&datetime, "%Y-%m-%dT%H:%M:%S%z")
+                {
+                    Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
+                    Err(_) => "".into(),
                 };
 
                 let subject = match (reason.as_str(), &notification.record) {
@@ -294,6 +320,16 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     _ => None,
                 };
 
+                let reason_subject = match reason.as_str() {
+                    "reply" => "replied to your post",
+                    "repost" => "reposted your post",
+                    "like" => "liked your post",
+                    "follow" => "followed you",
+                    "mention" => "mentioned you",
+                    "quote" => "quoted your post",
+                    _ => "",
+                };
+
                 let item = match subject {
                     Some(subject) => vec![
                         Line::from(vec![
@@ -302,9 +338,12 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                                 format!(" {} ", display_name),
                                 Style::default().fg(Color::White),
                             ),
-                            Span::styled(format!("@{} ", handle), Style::default().fg(Color::Gray)),
-                            Span::styled(datetime, Style::default().fg(Color::Gray)),
+                            Span::styled(
+                                format!("@{} {}", handle, duration_text),
+                                Style::default().fg(Color::Gray),
+                            ),
                         ]),
+                        Line::from(reason_subject),
                         Line::from(subject),
                         Line::from(Span::styled(
                             border.clone(),
@@ -321,6 +360,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                             Span::styled(format!("@{} ", handle), Style::default().fg(Color::Gray)),
                             Span::styled(datetime, Style::default().fg(Color::Gray)),
                         ]),
+                        Line::from(reason_subject),
                         Line::from(Span::styled(
                             border.clone(),
                             Style::default().fg(Color::Gray),

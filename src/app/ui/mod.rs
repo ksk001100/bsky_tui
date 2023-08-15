@@ -26,19 +26,25 @@ where
 
     match app.state.get_tab() {
         Tab::Timeline => {
-            let body = draw::timeline(app.state());
-            app.state
-                .get_tl_list_state()
-                .select(Some(app.state.get_tl_list_position()));
-            f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
-            if app.state.get_feeds().is_none() {
+            if app.state.get_timeline().is_none() {
                 let popup = draw::loading();
                 let area = layout::popup(60, 20, size);
                 f.render_widget(Clear, area);
                 f.render_widget(popup, area);
             }
+            let body = draw::timeline(app.state());
+            app.state
+                .get_tl_list_state()
+                .select(Some(app.state.get_tl_list_position()));
+            f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
         }
         Tab::Notifications => {
+            if app.state.get_notifications().is_none() {
+                let popup = draw::loading();
+                let area = layout::popup(60, 20, size);
+                f.render_widget(Clear, area);
+                f.render_widget(popup, area);
+            }
             let body = draw::notifications(app.state());
             app.state
                 .get_notifications_list_state()
@@ -48,12 +54,6 @@ where
                 body_chunks[1],
                 &mut app.state.get_notifications_list_state(),
             );
-            if app.state.get_notifications().is_none() {
-                let popup = draw::loading();
-                let area = layout::popup(60, 20, size);
-                f.render_widget(Clear, area);
-                f.render_widget(popup, area);
-            }
         }
     };
 
@@ -85,4 +85,15 @@ where
         //     area.y + 3,
         // );
     }
+}
+
+pub fn render_splash<B>(f: &mut Frame<B>, splash_text: String)
+where
+    B: Backend,
+{
+    let size = f.size();
+    let popup = draw::splash(splash_text);
+    let area = layout::popup(60, 60, size);
+    f.render_widget(Clear, area);
+    f.render_widget(popup, area);
 }

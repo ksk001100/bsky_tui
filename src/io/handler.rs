@@ -20,7 +20,7 @@ impl IoAsyncHandler {
     pub async fn handle_io_event(&mut self, io_event: IoEvent) {
         let _ = match io_event {
             IoEvent::Initialize => self.do_initialize().await,
-            IoEvent::LoadFeed => self.do_load_timeline().await,
+            IoEvent::LoadTimeline => self.do_load_timeline().await,
             IoEvent::SendPost => self.do_send_post().await,
             IoEvent::LoadNotifications => self.do_load_notifications().await,
             IoEvent::Like => self.do_like().await,
@@ -48,7 +48,7 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         let agent = app.state.get_agent().unwrap();
         let timeline = bsky::timeline(&agent).await?;
-        app.state.set_feeds(timeline.feed);
+        app.state.set_timeline(Some(timeline.feed));
 
         Ok(())
     }
@@ -75,7 +75,8 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         let agent = app.state.get_agent().unwrap();
         let notifications = bsky::notifications(&agent).await?;
-        app.state.set_notifications(notifications.notifications);
+        app.state
+            .set_notifications(Some(notifications.notifications));
 
         Ok(())
     }

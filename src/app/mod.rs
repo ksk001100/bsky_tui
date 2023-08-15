@@ -37,7 +37,7 @@ impl App {
                 Tab::Timeline => match key {
                     Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
                     Key::Char('r') => {
-                        self.dispatch(IoEvent::LoadFeed).await;
+                        self.dispatch(IoEvent::LoadTimeline).await;
                         AppReturn::Continue
                     }
                     Key::Char('n') => {
@@ -106,7 +106,7 @@ impl App {
                     }
                     Key::Tab => {
                         self.state.set_next_tab();
-                        self.dispatch(IoEvent::LoadFeed).await;
+                        self.dispatch(IoEvent::LoadTimeline).await;
                         AppReturn::Continue
                     }
                     _ => AppReturn::Continue,

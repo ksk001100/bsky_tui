@@ -49,7 +49,7 @@ pub enum AppState {
     Init,
     Initialized {
         agent: Arc<bsky::Agent>,
-        feeds: Option<Vec<FeedViewPost>>,
+        timeline: Option<Vec<FeedViewPost>>,
         notifications: Option<Vec<Notification>>,
         input_text: String,
         input_cursor_position: usize,
@@ -68,7 +68,7 @@ impl AppState {
         let agent = Arc::new(agent);
         Self::Initialized {
             agent,
-            feeds: None,
+            timeline: None,
             notifications: None,
             input_text: String::new(),
             input_cursor_position: 0,
@@ -187,7 +187,7 @@ impl AppState {
         if let Self::Initialized {
             tl_list_position,
             tl_list_state,
-            feeds: Some(feeds),
+            timeline: Some(feeds),
             ..
         } = self
         {
@@ -275,15 +275,15 @@ impl AppState {
         }
     }
 
-    pub fn set_feeds(&mut self, f: Vec<FeedViewPost>) {
-        if let Self::Initialized { feeds, .. } = self {
-            *feeds = Some(f);
+    pub fn set_timeline(&mut self, f: Option<Vec<FeedViewPost>>) {
+        if let Self::Initialized { timeline, .. } = self {
+            *timeline = f;
         }
     }
 
-    pub fn get_feeds(&self) -> Option<Vec<FeedViewPost>> {
-        if let Self::Initialized { feeds, .. } = self {
-            feeds.clone()
+    pub fn get_timeline(&self) -> Option<Vec<FeedViewPost>> {
+        if let Self::Initialized { timeline, .. } = self {
+            timeline.clone()
         } else {
             None
         }
@@ -369,12 +369,12 @@ impl AppState {
 
     pub fn get_current_feed(&self) -> Option<FeedViewPost> {
         if let Self::Initialized {
-            feeds,
+            timeline,
             tl_list_position,
             ..
         } = self
         {
-            feeds
+            timeline
                 .clone()
                 .and_then(|f| f.get(*tl_list_position).cloned())
         } else {
@@ -399,9 +399,9 @@ impl AppState {
         }
     }
 
-    pub fn set_notifications(&mut self, n: Vec<Notification>) {
+    pub fn set_notifications(&mut self, n: Option<Vec<Notification>>) {
         if let Self::Initialized { notifications, .. } = self {
-            *notifications = Some(n);
+            *notifications = n;
         }
     }
 
