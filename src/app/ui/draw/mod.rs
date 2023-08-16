@@ -78,73 +78,73 @@ pub fn help<'a>() -> Table<'a> {
         // Normal mode
         Row::new(vec![
             Cell::from("Normal Mode"),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("Tab"),
             Cell::from("Change tab"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("q, Ctrl+c, Esc"),
             Cell::from("Quit"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("r"),
             Cell::from("Reload list"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("?"),
             Cell::from("Show help popup"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("n"),
             Cell::from("New post popup"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("N"),
             Cell::from("Reply selected post popup"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("j, Ctrl+n, Down"),
             Cell::from("Select next post"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline/Notifications"),
+            Cell::from("Home/Notifications"),
             Cell::from("k, Ctrl+p, Up"),
             Cell::from("Select previous post"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline"),
+            Cell::from("Home"),
             Cell::from("Enter"),
             Cell::from("Selected post open in browser"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline"),
+            Cell::from("Home"),
             Cell::from("Ctrl+r"),
             Cell::from("Repost selected post (unrepost if already reposted)"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Timeline"),
+            Cell::from("Home"),
             Cell::from("Ctrl+l"),
             Cell::from("Like selected post (unlike if already liked)"),
         ]),
         // Post mode
         Row::new(vec![
-            Cell::from("Post Mode/Reply Mode"),
+            Cell::from("Post/Reply Mode"),
             Cell::from(""),
             Cell::from("Esc"),
             Cell::from("Return to normal mode"),
@@ -263,7 +263,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 .style(Style::default())
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
-                    "Timeline ({})",
+                    "Home ({})",
                     state.get_timeline().unwrap_or(vec![]).len()
                 ))
                 .border_type(BorderType::Plain),
@@ -462,7 +462,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
-    let titles = vec![Tab::Timeline, Tab::Notifications]
+    let titles = vec![Tab::Home, Tab::Notifications]
         .iter()
         .map(|t| format!("{}", t))
         .collect();

@@ -31,14 +31,14 @@ impl fmt::Display for Mode {
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Tab {
-    Timeline,
+    Home,
     Notifications,
 }
 
 impl fmt::Display for Tab {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
-            Tab::Timeline => "Timeline",
+            Tab::Home => "Home",
             Tab::Notifications => "Notifications",
         };
         write!(f, "{}", str)
@@ -77,7 +77,7 @@ impl AppState {
             notifications_list_position: 0,
             handle: Some(handle),
             mode: Mode::Normal,
-            tab: Tab::Timeline,
+            tab: Tab::Home,
         }
     }
 
@@ -331,15 +331,15 @@ impl AppState {
         if let Self::Initialized { tab, .. } = self {
             tab.clone()
         } else {
-            Tab::Timeline
+            Tab::Home
         }
     }
 
     pub fn set_next_tab(&mut self) {
         if let Self::Initialized { tab, .. } = self {
             *tab = match tab {
-                Tab::Timeline => Tab::Notifications,
-                Tab::Notifications => Tab::Timeline,
+                Tab::Home => Tab::Notifications,
+                Tab::Notifications => Tab::Home,
             }
         }
     }

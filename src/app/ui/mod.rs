@@ -25,7 +25,7 @@ where
     f.render_widget(tabs, body_chunks[0]);
 
     match app.state.get_tab() {
-        Tab::Timeline => {
+        Tab::Home => {
             if app.state.get_timeline().is_none() {
                 let popup = draw::loading();
                 let area = layout::popup(60, 20, size);

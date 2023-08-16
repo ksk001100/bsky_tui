@@ -35,7 +35,7 @@ impl App {
     pub async fn do_action(&mut self, key: Key) -> AppReturn {
         match self.state.get_mode() {
             state::Mode::Normal => match self.state.get_tab() {
-                Tab::Timeline => self.timeline_action(key).await,
+                Tab::Home => self.timeline_action(key).await,
                 Tab::Notifications => self.notifications_action(key).await,
             },
             state::Mode::Post => self.post_action(key).await,
