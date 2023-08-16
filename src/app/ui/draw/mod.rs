@@ -392,7 +392,8 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
 }
 
 pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
-    let text = state.get_input_text().unwrap_or_else(|| "".into());
+    // let text = state.get_input_text().unwrap_or_else(|| "".into());
+    let text = state.get_input().value().to_string();
     Paragraph::new(text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Left)
@@ -406,7 +407,7 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
-    let text = state.get_input_text().unwrap_or_else(|| "".into());
+    let text = state.get_input().value().to_string();
     let current_feed = state.get_current_feed();
 
     if current_feed.is_none() {

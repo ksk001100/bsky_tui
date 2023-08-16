@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use atrium_api::{app::bsky::feed::post::ReplyRef, com::atproto::repo::strong_ref};
 use eyre::Result;
+use tui_input::Input;
 
 use super::IoEvent;
 use crate::app::state::Mode;
@@ -57,14 +58,10 @@ impl IoAsyncHandler {
         {
             let mut app = self.app.lock().await;
             let agent = app.state.get_agent().unwrap();
-            bsky::send_post(
-                &agent,
-                app.state.get_input_text().unwrap_or("".to_string()),
-                None,
-            )
-            .await?;
+            let text = app.state.get_input().value().to_string();
+            bsky::send_post(&agent, text, None).await?;
             app.state.set_mode(Mode::Normal);
-            app.state.set_input_text("".to_string());
+            app.state.set_input(Input::default());
         }
         self.do_load_timeline().await?;
 
@@ -120,14 +117,10 @@ impl IoAsyncHandler {
                     uri: current_feed.post.uri.clone(),
                 },
             };
-            bsky::send_post(
-                &agent,
-                app.state.get_input_text().unwrap_or("".to_string()),
-                Some(reply),
-            )
-            .await?;
+            let text = app.state.get_input().value().to_string();
+            bsky::send_post(&agent, text, Some(reply)).await?;
             app.state.set_mode(Mode::Normal);
-            app.state.set_input_text("".to_string());
+            app.state.set_input(Input::default());
         }
         self.do_load_timeline().await?;
 

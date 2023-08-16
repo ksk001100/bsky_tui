@@ -5,6 +5,7 @@ use atrium_api::app::bsky::{
     feed::defs::FeedViewPost, notification::list_notifications::Notification,
 };
 use ratatui::widgets::ListState;
+use tui_input::{Input, InputRequest};
 
 use crate::bsky;
 
@@ -51,8 +52,7 @@ pub enum AppState {
         agent: Arc<bsky::Agent>,
         timeline: Option<Vec<FeedViewPost>>,
         notifications: Option<Vec<Notification>>,
-        input_text: String,
-        input_cursor_position: usize,
+        input: Input,
         tl_list_state: ListState,
         tl_list_position: usize,
         notifications_list_state: ListState,
@@ -70,8 +70,7 @@ impl AppState {
             agent,
             timeline: None,
             notifications: None,
-            input_text: String::new(),
-            input_cursor_position: 0,
+            input: Input::default(),
             tl_list_state: ListState::default().with_selected(Some(0)),
             tl_list_position: 0,
             notifications_list_state: ListState::default().with_selected(Some(0)),
@@ -102,70 +101,53 @@ impl AppState {
         }
     }
 
-    pub fn get_input_text(&self) -> Option<String> {
-        if let Self::Initialized { input_text, .. } = self {
-            Some(input_text.clone())
+    pub fn get_input(&self) -> Input {
+        if let Self::Initialized { input, .. } = self {
+            input.clone()
         } else {
-            None
+            Input::default()
         }
     }
 
-    pub fn set_input_text(&mut self, text: String) {
-        if let Self::Initialized { input_text, .. } = self {
-            *input_text = text;
+    pub fn set_input(&mut self, i: Input) {
+        if let Self::Initialized { input, .. } = self {
+            *input = i;
         }
     }
 
-    pub fn insert_input_text(&mut self, c: char) {
-        if let Self::Initialized {
-            input_text,
-            input_cursor_position,
-            ..
-        } = self
-        {
-            // let len = &c.to_string().len();
-            // input_text.insert_str(*input_cursor_position, &c.to_string());
-            // if input_cursor_position == &0 {
-            //     input_text.push(c);
-            //     *input_cursor_position = input_text.len() / 2;
-            // } else if input_text.chars().count() == *input_cursor_position {
-            //     input_text.push(c);
-            //     *input_cursor_position = input_text.len() / 2;
-            // } else {
-            //     // input_text.insert(*input_cursor_position, c);
-            //     let len = input_text.len() / 2;
-            //     *input_text = input_text
-            //         .get(..*input_cursor_position - 1)
-            //         .unwrap_or("")
-            //         .to_string()
-            //         + &c.to_string()
-            //         + &input_text
-            //             .get(*input_cursor_position..)
-            //             .unwrap_or("")
-            //             .to_string();
-            //     *input_cursor_position = len - *input_cursor_position + 1;
-            // }
-
-            // TODO: マルチバイト文字のカーソル位置調整がめんどいので後回し
-            input_text.push(c);
-            *input_cursor_position = input_text.len();
-
-            // input_text.push(c);
+    pub fn insert_input(&mut self, req: InputRequest) {
+        if let Self::Initialized { input: i, .. } = self {
+            i.handle(req);
         }
     }
 
-    pub fn remove_input_text(&mut self) {
-        if let Self::Initialized {
-            input_text,
-            input_cursor_position,
-            ..
-        } = self
-        {
-            if *input_cursor_position > 0 {
-                // input_text.remove(*input_cursor_position - 1);
-                input_text.pop();
-                *input_cursor_position = input_text.len();
-            }
+    pub fn move_input_cursor_prev(&mut self) {
+        if let Self::Initialized { input, .. } = self {
+            input.handle(InputRequest::GoToPrevChar);
+        }
+    }
+
+    pub fn move_input_cursor_next(&mut self) {
+        if let Self::Initialized { input, .. } = self {
+            input.handle(InputRequest::GoToNextChar);
+        }
+    }
+
+    pub fn move_input_cursor_start(&mut self) {
+        if let Self::Initialized { input, .. } = self {
+            input.handle(InputRequest::GoToStart);
+        }
+    }
+
+    pub fn move_input_cursor_end(&mut self) {
+        if let Self::Initialized { input, .. } = self {
+            input.handle(InputRequest::GoToEnd);
+        }
+    }
+
+    pub fn remove_input_prev(&mut self) {
+        if let Self::Initialized { input, .. } = self {
+            input.handle(InputRequest::DeletePrevChar);
         }
     }
 
@@ -250,31 +232,6 @@ impl AppState {
         }
     }
 
-    pub fn move_input_cursor_left(&mut self) {
-        if let Self::Initialized {
-            input_cursor_position,
-            ..
-        } = self
-        {
-            if *input_cursor_position > 0 {
-                *input_cursor_position -= 1;
-            }
-        }
-    }
-
-    pub fn move_input_cursor_right(&mut self) {
-        if let Self::Initialized {
-            input_text,
-            input_cursor_position,
-            ..
-        } = self
-        {
-            if *input_cursor_position < input_text.len() {
-                *input_cursor_position += 1;
-            }
-        }
-    }
-
     pub fn set_timeline(&mut self, f: Option<Vec<FeedViewPost>>) {
         if let Self::Initialized { timeline, .. } = self {
             *timeline = f;
@@ -332,18 +289,6 @@ impl AppState {
             matches!(mode, Mode::Help)
         } else {
             false
-        }
-    }
-
-    pub fn get_input_cursor_position(&self) -> usize {
-        if let Self::Initialized {
-            input_cursor_position,
-            ..
-        } = self
-        {
-            *input_cursor_position
-        } else {
-            0
         }
     }
 
