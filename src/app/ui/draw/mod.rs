@@ -144,7 +144,7 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         // Post mode
         Row::new(vec![
-            Cell::from("Post/Reply Mode"),
+            Cell::from("Post/Reply"),
             Cell::from(""),
             Cell::from("Esc"),
             Cell::from("Return to normal mode"),
@@ -158,12 +158,36 @@ pub fn help<'a>() -> Table<'a> {
         Row::new(vec![
             Cell::from(""),
             Cell::from(""),
+            Cell::from("Left, Ctrl+b"),
+            Cell::from("Move cursor left"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from("Right, Ctrl+f"),
+            Cell::from("Move cursor right"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from("Ctrl+a"),
+            Cell::from("Move cursor to start of line"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from("Ctrl+e"),
+            Cell::from("Move cursor to end of line"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
             Cell::from("Backspace, Ctrl+h"),
             Cell::from("Delete word"),
         ]),
         // Help mode
         Row::new(vec![
-            Cell::from("Help Mode"),
+            Cell::from("Help"),
             Cell::from(""),
             Cell::from("Esc, q, ?"),
             Cell::from("Return to normal mode"),
