@@ -50,13 +50,17 @@ pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>) -> Result<()> {
     }
 
     let mut split_splash: Vec<String> = SPLASH.split('\n').map(|s| s.to_string()).collect();
-    for i in 0..split_splash.len() {
+    while !split_splash.is_empty() {
         terminal.draw(|rect| ui::render_splash(rect, split_splash.join("\n")))?;
-        if i == 0 {
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-        } else {
-            tokio::time::sleep(Duration::from_millis(70)).await;
+
+        loop {
+            let app = app.lock().await;
+            if app.state.get_timeline().is_some() {
+                break;
+            }
         }
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
         split_splash.pop();
     }
 
