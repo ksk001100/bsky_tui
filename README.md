@@ -20,7 +20,7 @@ cargo install bsky_tui
 ## Usage
 
 ```bash
-export BLUESKY_EMAIL=<your email>
-export BLUESKY_PASSWORD=<your password>
+bsky_tui --help
+bsky_tui config #=> generate config file, please edit it
 bsky_tui
 ```

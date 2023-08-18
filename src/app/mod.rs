@@ -1,11 +1,14 @@
+pub mod config;
 pub mod state;
 pub mod ui;
 
 use self::state::AppState;
-use crate::app::state::Tab;
-use crate::bsky;
-use crate::inputs::key::Key;
-use crate::io::IoEvent;
+use crate::{
+    app::{config::AppConfig, state::Tab},
+    bsky,
+    inputs::key::Key,
+    io::IoEvent,
+};
 use tui_input::{Input, InputRequest};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -233,8 +236,14 @@ impl App {
         self.is_loading
     }
 
-    pub fn initialized(&mut self, agent: bsky::Agent, handle: String) {
-        self.state = AppState::initialized(agent, handle);
+    pub fn initialized(
+        &mut self,
+        agent: bsky::Agent,
+        handle: String,
+        did: String,
+        config: AppConfig,
+    ) {
+        self.state = AppState::initialized(agent, handle, did, config);
     }
 
     pub fn loaded(&mut self) {

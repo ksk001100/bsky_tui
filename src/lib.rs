@@ -32,7 +32,7 @@ const SPLASH: &str = r#"
                                                      OOb"       
 "#;
 
-pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>) -> Result<()> {
+pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>, skip_splash: bool) -> Result<()> {
     let stdout = stdout();
     crossterm::terminal::enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout);
@@ -49,19 +49,21 @@ pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>) -> Result<()> {
         app.dispatch(IoEvent::Initialize).await;
     }
 
-    let mut split_splash: Vec<String> = SPLASH.split('\n').map(|s| s.to_string()).collect();
-    while !split_splash.is_empty() {
-        terminal.draw(|rect| ui::render_splash(rect, split_splash.join("\n")))?;
+    if !skip_splash {
+        let mut split_splash: Vec<String> = SPLASH.split('\n').map(|s| s.to_string()).collect();
+        while !split_splash.is_empty() {
+            terminal.draw(|rect| ui::render_splash(rect, split_splash.join("\n")))?;
 
-        loop {
-            let app = app.lock().await;
-            if app.state.get_timeline().is_some() {
-                break;
+            loop {
+                let app = app.lock().await;
+                if app.state.get_timeline().is_some() {
+                    break;
+                }
             }
-        }
 
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        split_splash.pop();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            split_splash.pop();
+        }
     }
 
     loop {

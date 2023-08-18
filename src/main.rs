@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use seahorse::{App as SeahorseApp, Context};
+use seahorse::{App as SeahorseApp, Command, Context};
 
 use bsky_tui::{
-    app::App,
+    app::{config::AppConfig, App},
     io::{handler::IoAsyncHandler, IoEvent},
     start_ui,
 };
@@ -15,11 +15,25 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .usage(format!("{} [args]", env!("CARGO_PKG_NAME")))
         .action(action)
+        .command(config_command())
         .run(std::env::args().collect());
 }
 
 #[tokio::main]
 async fn action(_c: &Context) {
+    if !AppConfig::config_exists() {
+        let path = AppConfig::config_path();
+        println!("Config file not found: {}", path.to_str().unwrap());
+        println!("Run `bsky_tui generate` to generate a config file");
+        return;
+    }
+
+    let config = AppConfig::load().unwrap();
+    if let Err(e) = config.check_required_fields() {
+        println!("Config file error: {}", e);
+        return;
+    }
+
     console_subscriber::init();
     let (sync_io_tx, mut sync_io_rx) = tokio::sync::mpsc::channel::<IoEvent>(100);
 
@@ -33,5 +47,22 @@ async fn action(_c: &Context) {
         }
     });
 
-    start_ui(&app_ui).await.unwrap();
+    start_ui(&app_ui, config.skip_splash).await.unwrap();
+}
+
+fn config_command() -> Command {
+    Command::new("config")
+        .description("Generate config file")
+        .alias("c")
+        .action(|_| {
+            if AppConfig::config_exists() {
+                println!("Config file already exists");
+                return;
+            }
+            AppConfig::generate_config_file().unwrap();
+            println!(
+                "Config file generated at: {}",
+                AppConfig::config_path().to_str().unwrap()
+            );
+        })
 }

@@ -21,3 +21,7 @@ chrono = "0.4"
 webbrowser = "0.8"
 tui-input = "0.8"
 console-subscriber = "0.1"
+dirs = "5.0"
+config = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.7"

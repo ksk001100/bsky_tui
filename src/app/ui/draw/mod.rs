@@ -296,7 +296,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
 
 pub fn notifications<'a>(state: &AppState) -> List<'a> {
     let notifications = state.get_notifications();
-    let my_handle = state.get_handle().unwrap();
+    let my_handle = state.get_handle();
     let size = crossterm::terminal::size().unwrap();
     let border = "=".repeat((size.0 - 4) as usize);
 

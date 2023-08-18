@@ -7,7 +7,7 @@ use atrium_api::app::bsky::{
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
-use crate::bsky;
+use crate::{app::config::AppConfig, bsky};
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -57,14 +57,16 @@ pub enum AppState {
         tl_list_position: usize,
         notifications_list_state: ListState,
         notifications_list_position: usize,
-        handle: Option<String>,
+        handle: String,
+        did: String,
         mode: Mode,
         tab: Tab,
+        config: Box<AppConfig>,
     },
 }
 
 impl AppState {
-    pub fn initialized(agent: bsky::Agent, handle: String) -> Self {
+    pub fn initialized(agent: bsky::Agent, handle: String, did: String, config: AppConfig) -> Self {
         let agent = Arc::new(agent);
         Self::Initialized {
             agent,
@@ -75,9 +77,11 @@ impl AppState {
             tl_list_position: 0,
             notifications_list_state: ListState::default().with_selected(Some(0)),
             notifications_list_position: 0,
-            handle: Some(handle),
+            handle,
+            did,
             mode: Mode::Normal,
             tab: Tab::Home,
+            config: Box::new(config),
         }
     }
 
@@ -85,11 +89,11 @@ impl AppState {
         matches!(self, &Self::Initialized { .. })
     }
 
-    pub fn get_handle(&self) -> Option<String> {
+    pub fn get_handle(&self) -> String {
         if let Self::Initialized { handle, .. } = self {
             handle.clone()
         } else {
-            None
+            "".into()
         }
     }
 
@@ -98,6 +102,14 @@ impl AppState {
             Some(agent.clone())
         } else {
             None
+        }
+    }
+
+    pub fn get_did(&self) -> String {
+        if let Self::Initialized { did, .. } = self {
+            did.clone()
+        } else {
+            "".into()
         }
     }
 

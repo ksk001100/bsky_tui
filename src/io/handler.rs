@@ -5,9 +5,10 @@ use eyre::Result;
 use tui_input::Input;
 
 use super::IoEvent;
-use crate::app::state::Mode;
-use crate::app::App;
-use crate::bsky;
+use crate::{
+    app::{config::AppConfig, state::Mode, App},
+    bsky,
+};
 
 pub struct IoAsyncHandler {
     app: Arc<tokio::sync::Mutex<App>>,
@@ -35,10 +36,13 @@ impl IoAsyncHandler {
 
     async fn do_initialize(&mut self) -> Result<()> {
         {
+            let config = AppConfig::load()?;
             let mut app = self.app.lock().await;
-            let agent = bsky::agent_with_session().await?;
-            let session = bsky::session(&agent).await?;
-            app.initialized(agent, session.handle);
+            let agent =
+                bsky::agent_with_session(config.email.clone(), config.password.clone()).await?;
+            let session =
+                bsky::session(&agent, config.email.clone(), config.password.clone()).await?;
+            app.initialized(agent, session.handle, session.did, config);
         }
         self.do_load_timeline().await?;
 
@@ -62,6 +66,10 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
         };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
+        };
         let text = {
             let app = self.app.lock().await;
             app.state.get_input().value().to_string()
@@ -71,7 +79,7 @@ impl IoAsyncHandler {
             app.state.set_mode(Mode::Normal);
             app.state.set_input(Input::default());
         }
-        bsky::send_post(&agent, text, None).await?;
+        bsky::send_post(&agent, did, text, None).await?;
         self.do_load_timeline().await?;
 
         Ok(())
@@ -95,12 +103,16 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
         };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
+        };
         let current_feed = {
             let app = self.app.lock().await;
             app.state.get_current_feed().unwrap()
         };
 
-        bsky::toggle_like(&agent, current_feed).await?;
+        bsky::toggle_like(&agent, did, current_feed).await?;
         self.do_load_timeline().await?;
 
         Ok(())
@@ -111,12 +123,16 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
         };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
+        };
         let current_feed = {
             let app = self.app.lock().await;
             app.state.get_current_feed().unwrap()
         };
 
-        bsky::toggle_repost(&agent, current_feed).await?;
+        bsky::toggle_repost(&agent, did, current_feed).await?;
         self.do_load_timeline().await?;
 
         Ok(())
@@ -126,6 +142,10 @@ impl IoAsyncHandler {
         let agent = {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
+        };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
         };
         let current_feed = {
             let app = self.app.lock().await;
@@ -152,7 +172,7 @@ impl IoAsyncHandler {
             app.state.set_input(Input::default());
         }
 
-        bsky::send_post(&agent, text, Some(reply)).await?;
+        bsky::send_post(&agent, did, text, Some(reply)).await?;
         self.do_load_timeline().await?;
 
         Ok(())

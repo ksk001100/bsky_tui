@@ -13,9 +13,11 @@ use eyre::Result;
 
 pub type Agent = AtpAgent<BaseClient<ReqwestClient>>;
 
-pub async fn session(agent: &Agent) -> Result<server::create_session::Output> {
-    let identifier = std::env::var("BLUESKY_EMAIL").unwrap_or("".into());
-    let password = std::env::var("BLUESKY_PASSWORD").unwrap_or("".into());
+pub async fn session(
+    agent: &Agent,
+    email: String,
+    password: String,
+) -> Result<server::create_session::Output> {
     let session = agent
         .api
         .com
@@ -23,7 +25,7 @@ pub async fn session(agent: &Agent) -> Result<server::create_session::Output> {
         .server
         .create_session(server::create_session::Input {
             // TODO: use env vars
-            identifier,
+            identifier: email,
             password,
         })
         .await?;
@@ -31,9 +33,9 @@ pub async fn session(agent: &Agent) -> Result<server::create_session::Output> {
     Ok(session)
 }
 
-pub async fn agent_with_session() -> Result<Agent> {
+pub async fn agent_with_session(email: String, password: String) -> Result<Agent> {
     let mut agent = AtpAgent::new(ReqwestClient::new("https://bsky.social".into()));
-    let session = session(&agent).await?;
+    let session = session(&agent, email, password).await?;
     agent.set_session(session);
     Ok(agent)
 }
@@ -53,8 +55,12 @@ pub async fn timeline(agent: &Agent) -> Result<get_timeline::Output> {
 
     Ok(timeline)
 }
-pub async fn send_post(agent: &Agent, text: String, reply: Option<post::ReplyRef>) -> Result<()> {
-    let session = session(agent).await?;
+pub async fn send_post(
+    agent: &Agent,
+    did: String,
+    text: String,
+    reply: Option<post::ReplyRef>,
+) -> Result<()> {
     agent
         .api
         .com
@@ -71,7 +77,7 @@ pub async fn send_post(agent: &Agent, text: String, reply: Option<post::ReplyRef
                 reply,
                 text,
             })),
-            repo: session.did,
+            repo: did,
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -97,8 +103,7 @@ pub async fn notifications(agent: &Agent) -> Result<notification::list_notificat
     Ok(notifications)
 }
 
-pub async fn likes(agent: &Agent) -> Result<repo::list_records::Output> {
-    let session = session(agent).await?;
+pub async fn likes(agent: &Agent, did: String) -> Result<repo::list_records::Output> {
     let likes = agent
         .api
         .com
@@ -106,7 +111,7 @@ pub async fn likes(agent: &Agent) -> Result<repo::list_records::Output> {
         .repo
         .list_records(repo::list_records::Parameters {
             collection: String::from("app.bsky.feed.like"),
-            repo: session.did,
+            repo: did,
             cursor: None,
             limit: None,
             reverse: None,
@@ -118,8 +123,7 @@ pub async fn likes(agent: &Agent) -> Result<repo::list_records::Output> {
     Ok(likes)
 }
 
-pub async fn reposts(agent: &Agent) -> Result<repo::list_records::Output> {
-    let session = session(agent).await?;
+pub async fn reposts(agent: &Agent, did: String) -> Result<repo::list_records::Output> {
     let reposts = agent
         .api
         .com
@@ -127,7 +131,7 @@ pub async fn reposts(agent: &Agent) -> Result<repo::list_records::Output> {
         .repo
         .list_records(repo::list_records::Parameters {
             collection: String::from("app.bsky.feed.repost"),
-            repo: session.did,
+            repo: did,
             cursor: None,
             limit: None,
             reverse: None,
@@ -139,20 +143,19 @@ pub async fn reposts(agent: &Agent) -> Result<repo::list_records::Output> {
     Ok(reposts)
 }
 
-pub async fn toggle_like(agent: &Agent, feed: defs::FeedViewPost) -> Result<()> {
+pub async fn toggle_like(agent: &Agent, did: String, feed: defs::FeedViewPost) -> Result<()> {
     if let Some(viewer) = feed.post.viewer {
         if let Some(like) = viewer.like {
-            unlike(agent, uri_to_rkey(like).unwrap()).await?;
+            unlike(agent, did, uri_to_rkey(like).unwrap()).await?;
         } else {
-            like(agent, feed.post.cid, feed.post.uri).await?;
+            like(agent, did, feed.post.cid, feed.post.uri).await?;
         }
     }
 
     Ok(())
 }
 
-pub async fn like(agent: &Agent, cid: String, uri: String) -> Result<()> {
-    let session = session(agent).await?;
+pub async fn like(agent: &Agent, did: String, cid: String, uri: String) -> Result<()> {
     agent
         .api
         .com
@@ -169,7 +172,7 @@ pub async fn like(agent: &Agent, cid: String, uri: String) -> Result<()> {
                     },
                 },
             )),
-            repo: session.did,
+            repo: did,
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -179,8 +182,7 @@ pub async fn like(agent: &Agent, cid: String, uri: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn unlike(agent: &Agent, rkey: String) -> Result<()> {
-    let session = session(agent).await?;
+pub async fn unlike(agent: &Agent, did: String, rkey: String) -> Result<()> {
     agent
         .api
         .com
@@ -188,7 +190,7 @@ pub async fn unlike(agent: &Agent, rkey: String) -> Result<()> {
         .repo
         .delete_record(repo::delete_record::Input {
             collection: String::from("app.bsky.feed.like"),
-            repo: session.did,
+            repo: did,
             rkey,
             swap_commit: None,
             swap_record: None,
@@ -198,8 +200,7 @@ pub async fn unlike(agent: &Agent, rkey: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn repost(agent: &Agent, cid: String, uri: String) -> Result<()> {
-    let session = session(agent).await?;
+pub async fn repost(agent: &Agent, did: String, cid: String, uri: String) -> Result<()> {
     agent
         .api
         .com
@@ -216,7 +217,7 @@ pub async fn repost(agent: &Agent, cid: String, uri: String) -> Result<()> {
                     },
                 },
             )),
-            repo: session.did,
+            repo: did,
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -226,8 +227,7 @@ pub async fn repost(agent: &Agent, cid: String, uri: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn unrepost(agent: &Agent, rkey: String) -> Result<()> {
-    let session = session(agent).await?;
+pub async fn unrepost(agent: &Agent, did: String, rkey: String) -> Result<()> {
     agent
         .api
         .com
@@ -235,7 +235,7 @@ pub async fn unrepost(agent: &Agent, rkey: String) -> Result<()> {
         .repo
         .delete_record(repo::delete_record::Input {
             collection: String::from("app.bsky.feed.repost"),
-            repo: session.did,
+            repo: did,
             rkey,
             swap_commit: None,
             swap_record: None,
@@ -245,12 +245,12 @@ pub async fn unrepost(agent: &Agent, rkey: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn toggle_repost(agent: &Agent, feed: defs::FeedViewPost) -> Result<()> {
+pub async fn toggle_repost(agent: &Agent, did: String, feed: defs::FeedViewPost) -> Result<()> {
     if let Some(viewer) = feed.post.viewer {
         if let Some(repost) = viewer.repost {
-            unrepost(agent, uri_to_rkey(repost).unwrap()).await?;
+            unrepost(agent, did, uri_to_rkey(repost).unwrap()).await?;
         } else {
-            repost(agent, feed.post.cid, feed.post.uri).await?;
+            repost(agent, did, feed.post.cid, feed.post.uri).await?;
         }
     }
 
