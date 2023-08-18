@@ -82,7 +82,7 @@ where
         f.render_widget(popup, area);
         f.set_cursor(
             area.x + 2 + app.state.get_input().visual_cursor() as u16,
-            area.y + 2,
+            area.y + 6,
         );
     }
 }
