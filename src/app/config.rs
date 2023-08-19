@@ -10,14 +10,21 @@ pub struct AppConfig {
     pub email: String,
     pub password: String,
     pub skip_splash: bool,
+    pub splash_path: Option<String>,
 }
 
 impl AppConfig {
-    pub fn new(email: String, password: String, skip_splash: bool) -> Self {
+    pub fn new(
+        email: String,
+        password: String,
+        skip_splash: bool,
+        splash_path: Option<String>,
+    ) -> Self {
         Self {
             email,
             password,
             skip_splash,
+            splash_path,
         }
     }
 
@@ -61,6 +68,7 @@ impl AppConfig {
         let path = Self::config_path();
         let config = Config::builder()
             .set_default("skip_splash", false)?
+            .set_default("splash_path", None::<String>)?
             .add_source(
                 config::File::from(path)
                     .required(true)

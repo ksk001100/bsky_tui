@@ -15,24 +15,11 @@ use crate::{
     io::IoEvent,
 };
 
-// Bluesky splash screen
-const SPLASH: &str = r#"
-
-
-                                                                
-             ,,                                                 
-`7MM"""Yp, `7MM                            `7MM                 
-  MM    Yb   MM                              MM                 
-  MM    dP   MM `7MM  `7MM  .gP"Ya  ,pP"Ybd  MM  ,MP'`7M'   `MF'
-  MM"""bg.   MM   MM    MM ,M'   Yb 8I   `"  MM ;Y     VA   ,V  
-  MM    `Y   MM   MM    MM 8M"""""" `YMMMa.  MM;Mm      VA ,V   
-  MM    ,9   MM   MM    MM YM.    , L.   I8  MM `Mb.     VVV    
-.JMMmmmd9  .JMML. `Mbod"YML.`Mbmmd' M9mmmP'.JMML. YA.    ,V     
-                                                        ,V      
-                                                     OOb"       
-"#;
-
-pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>, skip_splash: bool) -> Result<()> {
+pub async fn start_ui(
+    app: &Arc<tokio::sync::Mutex<App>>,
+    skip_splash: bool,
+    splash: String,
+) -> Result<()> {
     let stdout = stdout();
     crossterm::terminal::enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout);
@@ -50,7 +37,7 @@ pub async fn start_ui(app: &Arc<tokio::sync::Mutex<App>>, skip_splash: bool) -> 
     }
 
     if !skip_splash {
-        let mut split_splash: Vec<String> = SPLASH.split('\n').map(|s| s.to_string()).collect();
+        let mut split_splash: Vec<String> = splash.split('\n').map(|s| s.to_string()).collect();
         while !split_splash.is_empty() {
             terminal.draw(|rect| ui::render_splash(rect, split_splash.join("\n")))?;
 

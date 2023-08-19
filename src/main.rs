@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use seahorse::{App as SeahorseApp, Command, Context};
 
+use bsky_tui::utils::get_splash;
 use bsky_tui::{
     app::{config::AppConfig, App},
     io::{handler::IoAsyncHandler, IoEvent},
@@ -47,7 +48,9 @@ async fn action(_c: &Context) {
         }
     });
 
-    start_ui(&app_ui, config.skip_splash).await.unwrap();
+    start_ui(&app_ui, config.skip_splash, get_splash(config.splash_path))
+        .await
+        .unwrap();
 }
 
 fn config_command() -> Command {
