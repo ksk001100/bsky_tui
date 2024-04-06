@@ -4,6 +4,7 @@ use std::sync::Arc;
 use atrium_api::app::bsky::{
     feed::defs::FeedViewPost, notification::list_notifications::Notification,
 };
+use atrium_api::types::string::{Did, Handle};
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
@@ -57,8 +58,8 @@ pub enum AppState {
         tl_list_position: usize,
         notifications_list_state: ListState,
         notifications_list_position: usize,
-        handle: String,
-        did: String,
+        handle: Handle,
+        did: Did,
         mode: Mode,
         tab: Tab,
         config: Box<AppConfig>,
@@ -67,7 +68,7 @@ pub enum AppState {
 }
 
 impl AppState {
-    pub fn initialized(agent: bsky::Agent, handle: String, did: String, config: AppConfig) -> Self {
+    pub fn initialized(agent: bsky::Agent, handle: Handle, did: Did, config: AppConfig) -> Self {
         let agent = Arc::new(agent);
         Self::Initialized {
             agent,
@@ -91,11 +92,11 @@ impl AppState {
         matches!(self, &Self::Initialized { .. })
     }
 
-    pub fn get_handle(&self) -> String {
+    pub fn get_handle(&self) -> Handle {
         if let Self::Initialized { handle, .. } = self {
             handle.clone()
         } else {
-            "".into()
+            Handle::new("".to_string()).unwrap()
         }
     }
 
@@ -107,11 +108,11 @@ impl AppState {
         }
     }
 
-    pub fn get_did(&self) -> String {
+    pub fn get_did(&self) -> Did {
         if let Self::Initialized { did, .. } = self {
             did.clone()
         } else {
-            "".into()
+            Did::new("".to_string()).unwrap()
         }
     }
 

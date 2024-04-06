@@ -7,7 +7,7 @@ use atrium_api::{
     com::atproto::{repo, server},
     records,
 };
-use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Nsid};
+use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid};
 use atrium_xrpc_client::reqwest::ReqwestClient;
 use eyre::Result;
 
@@ -62,7 +62,7 @@ pub async fn timeline(agent: &Agent, cursor: Option<String>) -> Result<get_timel
 
 pub async fn send_post(
     agent: &Agent,
-    did: String,
+    did: Did,
     text: String,
     reply: Option<post::ReplyRef>,
 ) -> Result<()> {
@@ -84,7 +84,7 @@ pub async fn send_post(
                 reply,
                 text,
             }))),
-            repo: AtIdentifier::Did(Did::new(did).unwrap()),
+            repo: AtIdentifier::Did(did),
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -150,7 +150,7 @@ pub async fn reposts(agent: &Agent, did: String) -> Result<repo::list_records::O
     Ok(reposts)
 }
 
-pub async fn toggle_like(agent: &Agent, did: String, feed: defs::FeedViewPost) -> Result<()> {
+pub async fn toggle_like(agent: &Agent, did: Did, feed: defs::FeedViewPost) -> Result<()> {
     if let Some(viewer) = feed.post.viewer {
         if let Some(like) = viewer.like {
             unlike(agent, did, uri_to_rkey(like).unwrap()).await?;
@@ -162,7 +162,7 @@ pub async fn toggle_like(agent: &Agent, did: String, feed: defs::FeedViewPost) -
     Ok(())
 }
 
-pub async fn like(agent: &Agent, did: String, cid: Cid, uri: String) -> Result<()> {
+pub async fn like(agent: &Agent, did: Did, cid: Cid, uri: String) -> Result<()> {
     agent
         .api
         .com
@@ -179,7 +179,7 @@ pub async fn like(agent: &Agent, did: String, cid: Cid, uri: String) -> Result<(
                     },
                 },
             ))),
-            repo: AtIdentifier::Did(Did::new(did).unwrap()),
+            repo: AtIdentifier::Did(did),
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -189,7 +189,7 @@ pub async fn like(agent: &Agent, did: String, cid: Cid, uri: String) -> Result<(
     Ok(())
 }
 
-pub async fn unlike(agent: &Agent, did: String, rkey: String) -> Result<()> {
+pub async fn unlike(agent: &Agent, did: Did, rkey: String) -> Result<()> {
     agent
         .api
         .com
@@ -197,7 +197,7 @@ pub async fn unlike(agent: &Agent, did: String, rkey: String) -> Result<()> {
         .repo
         .delete_record(repo::delete_record::Input {
             collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
-            repo: AtIdentifier::Did(Did::new(did).unwrap()),
+            repo: AtIdentifier::Did(did),
             rkey,
             swap_commit: None,
             swap_record: None,
@@ -207,7 +207,7 @@ pub async fn unlike(agent: &Agent, did: String, rkey: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn repost(agent: &Agent, did: String, cid: Cid, uri: String) -> Result<()> {
+pub async fn repost(agent: &Agent, did: Did, cid: Cid, uri: String) -> Result<()> {
     agent
         .api
         .com
@@ -224,7 +224,7 @@ pub async fn repost(agent: &Agent, did: String, cid: Cid, uri: String) -> Result
                     },
                 },
             ))),
-            repo: AtIdentifier::Did(Did::new(did).unwrap()),
+            repo: AtIdentifier::Did(did),
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -234,7 +234,7 @@ pub async fn repost(agent: &Agent, did: String, cid: Cid, uri: String) -> Result
     Ok(())
 }
 
-pub async fn unrepost(agent: &Agent, did: String, rkey: String) -> Result<()> {
+pub async fn unrepost(agent: &Agent, did: Did, rkey: String) -> Result<()> {
     agent
         .api
         .com
@@ -242,7 +242,7 @@ pub async fn unrepost(agent: &Agent, did: String, rkey: String) -> Result<()> {
         .repo
         .delete_record(repo::delete_record::Input {
             collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
-            repo: AtIdentifier::Did(Did::new(did).unwrap()),
+            repo: AtIdentifier::Did(did),
             rkey,
             swap_commit: None,
             swap_record: None,
@@ -252,7 +252,7 @@ pub async fn unrepost(agent: &Agent, did: String, rkey: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn toggle_repost(agent: &Agent, did: String, feed: defs::FeedViewPost) -> Result<()> {
+pub async fn toggle_repost(agent: &Agent, did: Did, feed: defs::FeedViewPost) -> Result<()> {
     if let Some(viewer) = feed.post.viewer {
         if let Some(repost) = viewer.repost {
             unrepost(agent, did, uri_to_rkey(repost).unwrap()).await?;
@@ -264,9 +264,9 @@ pub async fn toggle_repost(agent: &Agent, did: String, feed: defs::FeedViewPost)
     Ok(())
 }
 
-pub fn get_url(handle: String, uri: String) -> Option<String> {
+pub fn get_url(handle: Handle, uri: String) -> Option<String> {
     if let Some(id) = uri.split('/').last() {
-        let url = format!("https://bsky.app/profile/{}/post/{}", handle, id);
+        let url = format!("https://bsky.app/profile/{}/post/{}", handle.to_string(), id);
         Some(url.clone())
     } else {
         None

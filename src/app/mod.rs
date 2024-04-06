@@ -2,6 +2,7 @@ pub mod config;
 pub mod state;
 pub mod ui;
 
+use atrium_api::types::string::{Did, Handle};
 use self::state::AppState;
 use crate::{
     app::{config::AppConfig, state::Tab},
@@ -239,8 +240,8 @@ impl App {
     pub fn initialized(
         &mut self,
         agent: bsky::Agent,
-        handle: String,
-        did: String,
+        handle: Handle,
+        did: Did,
         config: AppConfig,
     ) {
         self.state = AppState::initialized(agent, handle, did, config);
