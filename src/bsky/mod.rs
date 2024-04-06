@@ -1,5 +1,6 @@
+use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid};
 use atrium_api::{
-    agent::{AtpAgent, store::MemorySessionStore},
+    agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
         feed::{defs, get_timeline, post},
         notification,
@@ -7,7 +8,6 @@ use atrium_api::{
     com::atproto::{repo, server},
     records,
 };
-use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid};
 use atrium_xrpc_client::reqwest::ReqwestClient;
 use eyre::Result;
 
@@ -73,17 +73,19 @@ pub async fn send_post(
         .repo
         .create_record(repo::create_record::Input {
             collection: Nsid::new("app.bsky.feed.post".to_string()).unwrap(),
-            record: records::Record::Known(records::KnownRecord::AppBskyFeedPost(Box::new(post::Record {
-                created_at: Datetime::now(),
-                embed: None,
-                entities: None,
-                facets: None,
-                langs: None,
-                labels: None,
-                tags: None,
-                reply,
-                text,
-            }))),
+            record: records::Record::Known(records::KnownRecord::AppBskyFeedPost(Box::new(
+                post::Record {
+                    created_at: Datetime::now(),
+                    embed: None,
+                    entities: None,
+                    facets: None,
+                    langs: None,
+                    labels: None,
+                    tags: None,
+                    reply,
+                    text,
+                },
+            ))),
             repo: AtIdentifier::Did(did),
             rkey: None,
             swap_commit: None,
@@ -266,7 +268,11 @@ pub async fn toggle_repost(agent: &Agent, did: Did, feed: defs::FeedViewPost) ->
 
 pub fn get_url(handle: Handle, uri: String) -> Option<String> {
     if let Some(id) = uri.split('/').last() {
-        let url = format!("https://bsky.app/profile/{}/post/{}", handle.to_string(), id);
+        let url = format!(
+            "https://bsky.app/profile/{}/post/{}",
+            handle.to_string(),
+            id
+        );
         Some(url.clone())
     } else {
         None

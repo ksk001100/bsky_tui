@@ -2,7 +2,6 @@ pub mod config;
 pub mod state;
 pub mod ui;
 
-use atrium_api::types::string::{Did, Handle};
 use self::state::AppState;
 use crate::{
     app::{config::AppConfig, state::Tab},
@@ -10,6 +9,7 @@ use crate::{
     inputs::key::Key,
     io::IoEvent,
 };
+use atrium_api::types::string::{Did, Handle};
 use tui_input::{Input, InputRequest};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -87,7 +87,8 @@ impl App {
                 if let Some(feed) = self.state.get_current_feed() {
                     if let Some(id) = feed.post.uri.split('/').last() {
                         let handle = feed.post.author.handle;
-                        let url = format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
+                        let url =
+                            format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
                         let _ = webbrowser::open(&url).is_ok();
                     }
                 }
@@ -237,13 +238,7 @@ impl App {
         self.is_loading
     }
 
-    pub fn initialized(
-        &mut self,
-        agent: bsky::Agent,
-        handle: Handle,
-        did: Did,
-        config: AppConfig,
-    ) {
+    pub fn initialized(&mut self, agent: bsky::Agent, handle: Handle, did: Did, config: AppConfig) {
         self.state = AppState::initialized(agent, handle, did, config);
     }
 

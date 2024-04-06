@@ -21,9 +21,9 @@ pub fn title<'a>() -> Paragraph<'a> {
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     ))
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(Block::default().style(Style::default().fg(Color::White)))
+    .style(Style::default().fg(Color::LightCyan))
+    .alignment(Alignment::Center)
+    .block(Block::default().style(Style::default().fg(Color::White)))
 }
 
 pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
@@ -222,13 +222,14 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
             .iter()
             .map(|feed| {
                 let post = feed.post.clone();
-                let (text, created_at) = if let Record::Known(records::KnownRecord::AppBskyFeedPost(r)) = post.record {
-                    // let c = r.created_at.rsplit('.').last().unwrap();
-                    let c = r.created_at;
-                    (r.text, format!("{:?}+0000", c))
-                } else {
-                    ("".into(), "".into())
-                };
+                let (text, created_at) =
+                    if let Record::Known(records::KnownRecord::AppBskyFeedPost(r)) = post.record {
+                        // let c = r.created_at.rsplit('.').last().unwrap();
+                        let c = r.created_at;
+                        (r.text, format!("{:?}+0000", c))
+                    } else {
+                        ("".into(), "".into())
+                    };
                 let display_name = post
                     .author
                     .display_name
@@ -335,15 +336,21 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                 };
 
                 let subject = match (reason.as_str(), &notification.record) {
-                    ("reply", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => Some(r.text.clone()),
+                    ("reply", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => {
+                        Some(r.text.clone())
+                    }
                     ("repost", Record::Known(records::KnownRecord::AppBskyFeedRepost(r))) => {
                         bsky::get_url(my_handle.clone(), r.subject.uri.clone())
                     }
                     ("like", Record::Known(records::KnownRecord::AppBskyFeedLike(r))) => {
                         bsky::get_url(my_handle.clone(), r.subject.uri.clone())
                     }
-                    ("mention", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => Some(r.text.clone()),
-                    ("quote", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => Some(r.text.clone()),
+                    ("mention", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => {
+                        Some(r.text.clone())
+                    }
+                    ("quote", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => {
+                        Some(r.text.clone())
+                    }
                     _ => None,
                 };
 
@@ -476,15 +483,15 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         Line::from(""),
         Line::from(text),
     ])
-        .style(Style::default().fg(Color::White).bg(Color::Black))
-        .alignment(Alignment::Left)
-        .block(
-            Block::default()
-                .style(Style::default().fg(Color::White))
-                .borders(Borders::ALL)
-                .title("Reply")
-                .padding(Padding::new(1, 1, 1, 1)),
-        )
+    .style(Style::default().fg(Color::White).bg(Color::Black))
+    .alignment(Alignment::Left)
+    .block(
+        Block::default()
+            .style(Style::default().fg(Color::White))
+            .borders(Borders::ALL)
+            .title("Reply")
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
