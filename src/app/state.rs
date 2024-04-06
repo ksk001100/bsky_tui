@@ -62,6 +62,7 @@ pub enum AppState {
         mode: Mode,
         tab: Tab,
         config: Box<AppConfig>,
+        cursor: Option<String>,
     },
 }
 
@@ -82,6 +83,7 @@ impl AppState {
             mode: Mode::Normal,
             tab: Tab::Home,
             config: Box::new(config),
+            cursor: None,
         }
     }
 
@@ -365,6 +367,20 @@ impl AppState {
     pub fn get_notifications(&self) -> Option<Vec<Notification>> {
         if let Self::Initialized { notifications, .. } = self {
             notifications.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn set_cursor(&mut self, c: Option<String>) {
+        if let Self::Initialized { cursor, .. } = self {
+            *cursor = c;
+        }
+    }
+
+    pub fn get_cursor(&self) -> Option<String> {
+        if let Self::Initialized { cursor, .. } = self {
+            cursor.clone()
         } else {
             None
         }

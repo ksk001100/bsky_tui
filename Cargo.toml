@@ -15,8 +15,9 @@ eyre = "0.6"
 seahorse = "2.1"
 tokio = { version = "1", features = ["full"] }
 ratatui = { version = "0.22", features = ["all-widgets"] }
-atrium-api = "0.4"
-atrium-xrpc = "0.3"
+atrium-api = "0.20"
+atrium-xrpc = "0.10"
+atrium-xrpc-client = "0.5"
 chrono = "0.4"
 webbrowser = "0.8"
 tui-input = "0.8"

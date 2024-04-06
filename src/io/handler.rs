@@ -42,7 +42,7 @@ impl IoAsyncHandler {
                 bsky::agent_with_session(config.email.clone(), config.password.clone()).await?;
             let session =
                 bsky::session(&agent, config.email.clone(), config.password.clone()).await?;
-            app.initialized(agent, session.handle, session.did, config);
+            app.initialized(agent, session.handle.to_string(), session.did.to_string(), config);
         }
         self.do_load_timeline().await?;
 
@@ -54,9 +54,17 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
         };
-        let timeline = bsky::timeline(&agent).await?;
-        let mut app = self.app.lock().await;
-        app.state.set_timeline(Some(timeline.feed));
+        let cursor = {
+            let app = self.app.lock().await;
+            app.state.get_cursor()
+        };
+        {
+            // let timeline = bsky::timeline(&agent, cursor).await?;
+            let timeline = bsky::timeline(&agent, None).await?;
+            let mut app = self.app.lock().await;
+            app.state.set_timeline(Some(timeline.feed));
+            app.state.set_cursor(timeline.cursor);
+        }
 
         Ok(())
     }

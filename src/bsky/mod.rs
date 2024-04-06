@@ -1,5 +1,5 @@
 use atrium_api::{
-    agent::{AtpAgent, BaseClient},
+    agent::{AtpAgent, store::MemorySessionStore},
     app::bsky::{
         feed::{defs, get_timeline, post},
         notification,
@@ -7,11 +7,11 @@ use atrium_api::{
     com::atproto::{repo, server},
     records,
 };
-use atrium_xrpc::client::reqwest::ReqwestClient;
-use chrono::Utc;
+use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Nsid};
+use atrium_xrpc_client::reqwest::ReqwestClient;
 use eyre::Result;
 
-pub type Agent = AtpAgent<BaseClient<ReqwestClient>>;
+pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
 
 pub async fn session(
     agent: &Agent,
@@ -34,13 +34,17 @@ pub async fn session(
 }
 
 pub async fn agent_with_session(email: String, password: String) -> Result<Agent> {
-    let mut agent = AtpAgent::new(ReqwestClient::new("https://bsky.social".into()));
+    // let mut agent = AtpAgent::new(ReqwestClient::new("https://bsky.social".into()));
+    let agent = AtpAgent::new(
+        ReqwestClient::new("https://bsky.social"),
+        MemorySessionStore::default(),
+    );
     let session = session(&agent, email, password).await?;
-    agent.set_session(session);
+    agent.resume_session(session).await?;
     Ok(agent)
 }
 
-pub async fn timeline(agent: &Agent) -> Result<get_timeline::Output> {
+pub async fn timeline(agent: &Agent, cursor: Option<String>) -> Result<get_timeline::Output> {
     let timeline = agent
         .api
         .app
@@ -48,13 +52,14 @@ pub async fn timeline(agent: &Agent) -> Result<get_timeline::Output> {
         .feed
         .get_timeline(atrium_api::app::bsky::feed::get_timeline::Parameters {
             algorithm: None,
-            cursor: None,
+            cursor: cursor.clone(),
             limit: None,
         })
         .await?;
 
     Ok(timeline)
 }
+
 pub async fn send_post(
     agent: &Agent,
     did: String,
@@ -67,17 +72,19 @@ pub async fn send_post(
         .atproto
         .repo
         .create_record(repo::create_record::Input {
-            collection: String::from("app.bsky.feed.post"),
-            record: records::Record::AppBskyFeedPost(Box::new(post::Record {
-                created_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            collection: Nsid::new("app.bsky.feed.post".to_string()).unwrap(),
+            record: records::Record::Known(records::KnownRecord::AppBskyFeedPost(Box::new(post::Record {
+                created_at: Datetime::now(),
                 embed: None,
                 entities: None,
                 facets: None,
                 langs: None,
+                labels: None,
+                tags: None,
                 reply,
                 text,
-            })),
-            repo: did,
+            }))),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -110,8 +117,8 @@ pub async fn likes(agent: &Agent, did: String) -> Result<repo::list_records::Out
         .atproto
         .repo
         .list_records(repo::list_records::Parameters {
-            collection: String::from("app.bsky.feed.like"),
-            repo: did,
+            collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             cursor: None,
             limit: None,
             reverse: None,
@@ -130,8 +137,8 @@ pub async fn reposts(agent: &Agent, did: String) -> Result<repo::list_records::O
         .atproto
         .repo
         .list_records(repo::list_records::Parameters {
-            collection: String::from("app.bsky.feed.repost"),
-            repo: did,
+            collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             cursor: None,
             limit: None,
             reverse: None,
@@ -155,24 +162,24 @@ pub async fn toggle_like(agent: &Agent, did: String, feed: defs::FeedViewPost) -
     Ok(())
 }
 
-pub async fn like(agent: &Agent, did: String, cid: String, uri: String) -> Result<()> {
+pub async fn like(agent: &Agent, did: String, cid: Cid, uri: String) -> Result<()> {
     agent
         .api
         .com
         .atproto
         .repo
         .create_record(repo::create_record::Input {
-            collection: String::from("app.bsky.feed.like"),
-            record: records::Record::AppBskyFeedLike(Box::new(
+            collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
+            record: records::Record::Known(records::KnownRecord::AppBskyFeedLike(Box::new(
                 atrium_api::app::bsky::feed::like::Record {
-                    created_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+                    created_at: Datetime::now(),
                     subject: repo::strong_ref::Main {
                         cid: cid.clone(),
                         uri: uri.clone(),
                     },
                 },
-            )),
-            repo: did,
+            ))),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -189,8 +196,8 @@ pub async fn unlike(agent: &Agent, did: String, rkey: String) -> Result<()> {
         .atproto
         .repo
         .delete_record(repo::delete_record::Input {
-            collection: String::from("app.bsky.feed.like"),
-            repo: did,
+            collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             rkey,
             swap_commit: None,
             swap_record: None,
@@ -200,24 +207,24 @@ pub async fn unlike(agent: &Agent, did: String, rkey: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn repost(agent: &Agent, did: String, cid: String, uri: String) -> Result<()> {
+pub async fn repost(agent: &Agent, did: String, cid: Cid, uri: String) -> Result<()> {
     agent
         .api
         .com
         .atproto
         .repo
         .create_record(repo::create_record::Input {
-            collection: String::from("app.bsky.feed.repost"),
-            record: records::Record::AppBskyFeedRepost(Box::new(
+            collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
+            record: records::Record::Known(records::KnownRecord::AppBskyFeedRepost(Box::new(
                 atrium_api::app::bsky::feed::repost::Record {
-                    created_at: Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+                    created_at: Datetime::now(),
                     subject: repo::strong_ref::Main {
                         cid: cid.clone(),
                         uri: uri.clone(),
                     },
                 },
-            )),
-            repo: did,
+            ))),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             rkey: None,
             swap_commit: None,
             validate: None,
@@ -234,8 +241,8 @@ pub async fn unrepost(agent: &Agent, did: String, rkey: String) -> Result<()> {
         .atproto
         .repo
         .delete_record(repo::delete_record::Input {
-            collection: String::from("app.bsky.feed.repost"),
-            repo: did,
+            collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
+            repo: AtIdentifier::Did(Did::new(did).unwrap()),
             rkey,
             swap_commit: None,
             swap_record: None,

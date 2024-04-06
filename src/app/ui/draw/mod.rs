@@ -1,3 +1,4 @@
+use atrium_api::records;
 use atrium_api::records::Record;
 use chrono::{DateTime, Utc};
 use ratatui::{
@@ -20,9 +21,9 @@ pub fn title<'a>() -> Paragraph<'a> {
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     ))
-    .style(Style::default().fg(Color::LightCyan))
-    .alignment(Alignment::Center)
-    .block(Block::default().style(Style::default().fg(Color::White)))
+        .style(Style::default().fg(Color::LightCyan))
+        .alignment(Alignment::Center)
+        .block(Block::default().style(Style::default().fg(Color::White)))
 }
 
 pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
@@ -221,9 +222,10 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
             .iter()
             .map(|feed| {
                 let post = feed.post.clone();
-                let (text, created_at) = if let Record::AppBskyFeedPost(r) = post.record {
-                    let c = r.created_at.rsplit('.').last().unwrap();
-                    (r.text, format!("{}+0000", c))
+                let (text, created_at) = if let Record::Known(records::KnownRecord::AppBskyFeedPost(r)) = post.record {
+                    // let c = r.created_at.rsplit('.').last().unwrap();
+                    let c = r.created_at;
+                    (r.text, format!("{:?}+0000", c))
                 } else {
                     ("".into(), "".into())
                 };
@@ -248,7 +250,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                             Style::default().fg(Color::White),
                         ),
                         Span::styled(
-                            format!("@{} {}", handle, duration_text),
+                            format!("@{} {}", handle.to_string(), duration_text),
                             Style::default().fg(Color::Gray),
                         ),
                     ]),
@@ -312,8 +314,9 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     .unwrap_or_else(|| "".into());
                 let reason = notification.reason.clone();
                 let datetime = format!(
-                    "{}+0000",
-                    notification.indexed_at.clone().rsplit('.').last().unwrap()
+                    "{:?}+0000",
+                    // notification.indexed_at.clone().rsplit('.').last().unwrap()
+                    notification.indexed_at
                 );
                 let reason_icon = match reason.as_str() {
                     "reply" => Span::styled("↩", Style::default().fg(Color::Gray)),
@@ -332,15 +335,15 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                 };
 
                 let subject = match (reason.as_str(), &notification.record) {
-                    ("reply", Record::AppBskyFeedPost(r)) => Some(r.text.clone()),
-                    ("repost", Record::AppBskyFeedRepost(r)) => {
+                    ("reply", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => Some(r.text.clone()),
+                    ("repost", Record::Known(records::KnownRecord::AppBskyFeedRepost(r))) => {
                         bsky::get_url(my_handle.clone(), r.subject.uri.clone())
                     }
-                    ("like", Record::AppBskyFeedLike(r)) => {
+                    ("like", Record::Known(records::KnownRecord::AppBskyFeedLike(r))) => {
                         bsky::get_url(my_handle.clone(), r.subject.uri.clone())
                     }
-                    ("mention", Record::AppBskyFeedPost(r)) => Some(r.text.clone()),
-                    ("quote", Record::AppBskyFeedPost(r)) => Some(r.text.clone()),
+                    ("mention", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => Some(r.text.clone()),
+                    ("quote", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => Some(r.text.clone()),
                     _ => None,
                 };
 
@@ -363,7 +366,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle, duration_text),
+                                format!("@{} {}", handle.to_string(), duration_text),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -382,7 +385,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle, duration_text),
+                                format!("@{} {}", handle.to_string(), duration_text),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -446,7 +449,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         .unwrap_or_else(|| "".into());
     let handle = current_feed.post.author.handle.clone();
     let parent_text = match current_feed.post.record {
-        Record::AppBskyFeedPost(post) => post.text.clone(),
+        Record::Known(records::KnownRecord::AppBskyFeedPost(post)) => post.text.clone(),
         _ => "".into(),
     };
     let reply_count = current_feed.post.reply_count.unwrap_or(0);
@@ -454,7 +457,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     let like_count = current_feed.post.like_count.unwrap_or(0);
 
     Paragraph::new(vec![
-        Line::from(format!("{} @{}", display_name, handle)),
+        Line::from(format!("{} @{}", display_name, handle.to_string())),
         Line::from(parent_text),
         Line::from(vec![
             Span::styled(
@@ -473,15 +476,15 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         Line::from(""),
         Line::from(text),
     ])
-    .style(Style::default().fg(Color::White).bg(Color::Black))
-    .alignment(Alignment::Left)
-    .block(
-        Block::default()
-            .style(Style::default().fg(Color::White))
-            .borders(Borders::ALL)
-            .title("Reply")
-            .padding(Padding::new(1, 1, 1, 1)),
-    )
+        .style(Style::default().fg(Color::White).bg(Color::Black))
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .style(Style::default().fg(Color::White))
+                .borders(Borders::ALL)
+                .title("Reply")
+                .padding(Padding::new(1, 1, 1, 1)),
+        )
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {

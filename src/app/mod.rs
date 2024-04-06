@@ -86,7 +86,7 @@ impl App {
                 if let Some(feed) = self.state.get_current_feed() {
                     if let Some(id) = feed.post.uri.split('/').last() {
                         let handle = feed.post.author.handle;
-                        let url = format!("https://bsky.app/profile/{}/post/{}", handle, id);
+                        let url = format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
                         let _ = webbrowser::open(&url).is_ok();
                     }
                 }
