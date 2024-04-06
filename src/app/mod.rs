@@ -3,6 +3,7 @@ pub mod state;
 pub mod ui;
 
 use self::state::AppState;
+use crate::io::TimelineEvent;
 use crate::{
     app::{config::AppConfig, state::Tab},
     bsky,
@@ -52,7 +53,8 @@ impl App {
         match key {
             Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
             Key::Char('r') => {
-                self.dispatch(IoEvent::LoadTimeline).await;
+                self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                    .await;
                 AppReturn::Continue
             }
             Key::Char('n') => {
@@ -99,6 +101,16 @@ impl App {
                 self.dispatch(IoEvent::LoadNotifications).await;
                 AppReturn::Continue
             }
+            Key::Char('h') | Key::Left => {
+                self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Prev))
+                    .await;
+                AppReturn::Continue
+            }
+            Key::Char('l') | Key::Right => {
+                self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Next))
+                    .await;
+                AppReturn::Continue
+            }
             _ => AppReturn::Continue,
         }
     }
@@ -124,7 +136,8 @@ impl App {
             }
             Key::Tab => {
                 self.state.set_next_tab();
-                self.dispatch(IoEvent::LoadTimeline).await;
+                self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                    .await;
                 AppReturn::Continue
             }
             _ => AppReturn::Continue,

@@ -128,6 +128,18 @@ pub fn help<'a>() -> Table<'a> {
         Row::new(vec![
             Cell::from(""),
             Cell::from("Home"),
+            Cell::from("l, Right"),
+            Cell::from("Next page"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home"),
+            Cell::from("h, Left"),
+            Cell::from("Prev page"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home"),
             Cell::from("Enter"),
             Cell::from("Selected post open in browser"),
         ]),
@@ -290,7 +302,8 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 .style(Style::default())
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
-                    "Home ({})",
+                    "Home ({}: {})",
+                    state.get_tl_current_cursor_index() + 1,
                     state.get_timeline().unwrap_or(vec![]).len()
                 ))
                 .border_type(BorderType::Plain),

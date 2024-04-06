@@ -4,7 +4,7 @@ use atrium_api::{app::bsky::feed::post::ReplyRef, com::atproto::repo::strong_ref
 use eyre::Result;
 use tui_input::Input;
 
-use super::IoEvent;
+use super::{IoEvent, TimelineEvent};
 use crate::{
     app::{config::AppConfig, state::Mode, App},
     bsky,
@@ -22,7 +22,7 @@ impl IoAsyncHandler {
     pub async fn handle_io_event(&mut self, io_event: IoEvent) {
         let _ = match io_event {
             IoEvent::Initialize => self.do_initialize().await,
-            IoEvent::LoadTimeline => self.do_load_timeline().await,
+            IoEvent::LoadTimeline(action) => self.do_load_timeline(action).await,
             IoEvent::SendPost => self.do_send_post().await,
             IoEvent::LoadNotifications => self.do_load_notifications().await,
             IoEvent::Like => self.do_like().await,
@@ -44,26 +44,69 @@ impl IoAsyncHandler {
                 bsky::session(&agent, config.email.clone(), config.password.clone()).await?;
             app.initialized(agent, session.handle, session.did, config);
         }
-        self.do_load_timeline().await?;
+        self.do_load_timeline(TimelineEvent::Load).await?;
 
         Ok(())
     }
 
-    async fn do_load_timeline(&mut self) -> Result<()> {
+    async fn do_load_timeline(&mut self, event: TimelineEvent) -> Result<()> {
         let agent = {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
         };
-        // let cursor = {
-        //     let app = self.app.lock().await;
-        //     app.state.get_cursor()
-        // };
+        let cursor = match event {
+            TimelineEvent::Load => None,
+            TimelineEvent::Next => {
+                let app = self.app.lock().await;
+                app.state.get_next_cursor()
+            }
+            TimelineEvent::Prev => {
+                let app = self.app.lock().await;
+                app.state.get_prev_cursor()
+            }
+            TimelineEvent::Reload => {
+                let app = self.app.lock().await;
+                app.state.get_current_cursor()
+            }
+        };
+        let current_cursor_index = {
+            let app = self.app.lock().await;
+            app.state.get_tl_current_cursor_index()
+        };
+
+        if event == TimelineEvent::Prev && current_cursor_index == 0 {
+            return Ok(());
+        }
+
         {
-            // let timeline = bsky::timeline(&agent, cursor).await?;
-            let timeline = bsky::timeline(&agent, None).await?;
+            let timeline = bsky::timeline(&agent, cursor).await?;
             let mut app = self.app.lock().await;
             app.state.set_timeline(Some(timeline.feed));
-            app.state.set_cursor(timeline.cursor);
+
+            match event {
+                TimelineEvent::Load => {
+                    let mut cursors = app.state.get_cursors().clone();
+                    cursors.push(timeline.cursor);
+                    app.state.set_cursors(cursors);
+                }
+                TimelineEvent::Next => {
+                    let mut cursors = app.state.get_cursors().clone();
+                    cursors.push(timeline.cursor);
+                    app.state.set_cursors(cursors);
+                    app.state
+                        .set_tl_current_cursor_index(current_cursor_index + 1);
+                    app.state.move_tl_scroll_top();
+                }
+                TimelineEvent::Prev => {
+                    if current_cursor_index == 0 {
+                        return Ok(());
+                    }
+                    app.state
+                        .set_tl_current_cursor_index(current_cursor_index - 1);
+                    app.state.move_tl_scroll_top();
+                }
+                _ => (),
+            }
         }
 
         Ok(())
@@ -88,7 +131,7 @@ impl IoAsyncHandler {
             app.state.set_input(Input::default());
         }
         bsky::send_post(&agent, did, text, None).await?;
-        self.do_load_timeline().await?;
+        self.do_load_timeline(TimelineEvent::Load).await?;
 
         Ok(())
     }
@@ -121,7 +164,7 @@ impl IoAsyncHandler {
         };
 
         bsky::toggle_like(&agent, did, current_feed).await?;
-        self.do_load_timeline().await?;
+        self.do_load_timeline(TimelineEvent::Reload).await?;
 
         Ok(())
     }
@@ -141,7 +184,7 @@ impl IoAsyncHandler {
         };
 
         bsky::toggle_repost(&agent, did, current_feed).await?;
-        self.do_load_timeline().await?;
+        self.do_load_timeline(TimelineEvent::Reload).await?;
 
         Ok(())
     }
@@ -181,7 +224,7 @@ impl IoAsyncHandler {
         }
 
         bsky::send_post(&agent, did, text, Some(reply)).await?;
-        self.do_load_timeline().await?;
+        self.do_load_timeline(TimelineEvent::Load).await?;
 
         Ok(())
     }

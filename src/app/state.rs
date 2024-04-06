@@ -63,7 +63,8 @@ pub enum AppState {
         mode: Mode,
         tab: Tab,
         config: Box<AppConfig>,
-        cursor: Option<String>,
+        tl_current_cursor_index: usize,
+        cursors: Vec<Option<String>>,
     },
 }
 
@@ -84,7 +85,8 @@ impl AppState {
             mode: Mode::Normal,
             tab: Tab::Home,
             config: Box::new(config),
-            cursor: None,
+            tl_current_cursor_index: 0,
+            cursors: vec![None],
         }
     }
 
@@ -163,6 +165,12 @@ impl AppState {
     pub fn remove_input_prev(&mut self) {
         if let Self::Initialized { input, .. } = self {
             input.handle(InputRequest::DeletePrevChar);
+        }
+    }
+
+    pub fn move_tl_scroll_top(&mut self) {
+        if let Self::Initialized { tl_list_state, .. } = self {
+            tl_list_state.select(Some(0));
         }
     }
 
@@ -373,15 +381,82 @@ impl AppState {
         }
     }
 
-    pub fn set_cursor(&mut self, c: Option<String>) {
-        if let Self::Initialized { cursor, .. } = self {
-            *cursor = c;
+    pub fn get_tl_current_cursor_index(&self) -> usize {
+        if let Self::Initialized {
+            tl_current_cursor_index,
+            ..
+        } = self
+        {
+            *tl_current_cursor_index
+        } else {
+            0
         }
     }
 
-    pub fn get_cursor(&self) -> Option<String> {
-        if let Self::Initialized { cursor, .. } = self {
-            cursor.clone()
+    pub fn set_tl_current_cursor_index(&mut self, index: usize) {
+        if let Self::Initialized {
+            tl_current_cursor_index,
+            ..
+        } = self
+        {
+            *tl_current_cursor_index = index;
+        }
+    }
+
+    pub fn get_cursors(&self) -> Vec<Option<String>> {
+        if let Self::Initialized { cursors, .. } = self {
+            cursors.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn set_cursors(&mut self, cursors: Vec<Option<String>>) {
+        if let Self::Initialized { cursors: c, .. } = self {
+            *c = cursors;
+        }
+    }
+
+    pub fn get_current_cursor(&self) -> Option<String> {
+        if let Self::Initialized {
+            tl_current_cursor_index,
+            cursors,
+            ..
+        } = self
+        {
+            cursors.get(*tl_current_cursor_index).cloned().unwrap()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_next_cursor(&self) -> Option<String> {
+        if let Self::Initialized {
+            tl_current_cursor_index,
+            cursors,
+            ..
+        } = self
+        {
+            if *tl_current_cursor_index + 1 == cursors.len() {
+                return None;
+            }
+            cursors.get(*tl_current_cursor_index + 1).cloned().unwrap()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_prev_cursor(&self) -> Option<String> {
+        if let Self::Initialized {
+            tl_current_cursor_index,
+            cursors,
+            ..
+        } = self
+        {
+            if *tl_current_cursor_index == 0 {
+                return None;
+            }
+            cursors.get(*tl_current_cursor_index - 1).cloned().unwrap()
         } else {
             None
         }
