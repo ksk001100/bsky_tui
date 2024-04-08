@@ -59,7 +59,10 @@ fn config_command() -> Command {
         .alias("c")
         .action(|_| {
             if AppConfig::config_exists() {
-                println!("Config file already exists");
+                println!(
+                    "Config file already exists: {}",
+                    AppConfig::config_path().to_str().unwrap()
+                );
                 return;
             }
             AppConfig::generate_config_file().unwrap();
