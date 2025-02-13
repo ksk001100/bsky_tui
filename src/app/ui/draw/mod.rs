@@ -471,11 +471,12 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         .clone()
         .unwrap_or_else(|| "".into());
     let handle = current_feed.post.author.handle.to_string();
-    let parent_text = "".to_string();
-    // match current_feed.post.record {
-    //     Record::Known(records::KnownRecord::AppBskyFeedPost(post)) => post.text.clone(),
-    //     _ => "".into(),
-    // };
+    let parent_text =
+        if let Ok(post) = post::Record::try_from_unknown(current_feed.post.record.clone()) {
+            post.text.clone()
+        } else {
+            "".to_string()
+        };
     let reply_count = current_feed.post.reply_count.unwrap_or(0);
     let repost_count = current_feed.post.repost_count.unwrap_or(0);
     let like_count = current_feed.post.like_count.unwrap_or(0);
