@@ -1,5 +1,5 @@
-use atrium_api::records;
-use atrium_api::records::Record;
+use atrium_api::app::bsky::feed::{post, repost};
+use bsky_sdk::api::types::TryFromUnknown;
 use chrono::{DateTime, Utc};
 use ratatui::{
     layout::{Alignment, Constraint},
@@ -207,21 +207,23 @@ pub fn help<'a>() -> Table<'a> {
         ]),
     ];
 
-    Table::new(rows)
-        .block(
-            Block::default()
-                .title("Help")
-                .borders(Borders::ALL)
-                .style(Style::default().fg(Color::White).bg(Color::Black))
-                .border_type(BorderType::Plain),
-        )
-        .widths(&[
+    Table::new(
+        rows,
+        [
             Constraint::Length(15),
             Constraint::Length(25),
             Constraint::Length(20),
             Constraint::Percentage(80),
-        ])
-        .column_spacing(1)
+        ],
+    )
+    .block(
+        Block::default()
+            .title("Help")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::White).bg(Color::Black))
+            .border_type(BorderType::Plain),
+    )
+    .column_spacing(1)
 }
 
 pub fn timeline<'a>(state: &AppState) -> List<'a> {
@@ -233,12 +235,12 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
         Some(feeds) => feeds
             .iter()
             .map(|feed| {
-                let post = feed.post.clone();
+                let post = &feed.post;
                 let (text, created_at) =
-                    if let Record::Known(records::KnownRecord::AppBskyFeedPost(r)) = post.record {
+                    if let Ok(r) = post::Record::try_from_unknown(post.record.clone()) {
                         // let c = r.created_at.rsplit('.').last().unwrap();
-                        let c = r.created_at;
-                        (r.text, format!("{:?}+0000", c))
+                        let c = &r.created_at;
+                        (r.text.clone(), format!("{:?}+0000", c))
                     } else {
                         ("".into(), "".into())
                     };
@@ -247,7 +249,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                     .display_name
                     .clone()
                     .unwrap_or_else(|| "".into());
-                let handle = post.author.handle.clone();
+                let handle = post.author.handle.to_string();
                 let reply_count = post.reply_count.unwrap_or(0);
                 let repost_count = post.repost_count.unwrap_or(0);
                 let like_count = post.like_count.unwrap_or(0);
@@ -259,11 +261,11 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 let item = vec![
                     Line::from(vec![
                         Span::styled(
-                            format!("{} ", display_name),
+                            format!("{display_name} "),
                             Style::default().fg(Color::White),
                         ),
                         Span::styled(
-                            format!("@{} {}", handle.to_string(), duration_text),
+                            format!("@{handle} {duration_text}"),
                             Style::default().fg(Color::Gray),
                         ),
                     ]),
@@ -304,7 +306,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 .title(format!(
                     "Home ({}: {})",
                     state.get_tl_current_cursor_index() + 1,
-                    state.get_timeline().unwrap_or(vec![]).len()
+                    state.get_timeline().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),
         )
@@ -320,19 +322,19 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
         Some(notifications) => notifications
             .iter()
             .map(|notification| {
-                let handle = notification.author.handle.clone();
+                let handle = notification.author.handle.to_string();
                 let display_name = notification
                     .author
                     .display_name
                     .clone()
                     .unwrap_or_else(|| "".into());
-                let reason = notification.reason.clone();
+                let reason = notification.reason.as_str();
                 let datetime = format!(
                     "{:?}+0000",
                     // notification.indexed_at.clone().rsplit('.').last().unwrap()
                     notification.indexed_at
                 );
-                let reason_icon = match reason.as_str() {
+                let reason_icon = match reason {
                     "reply" => Span::styled("↩", Style::default().fg(Color::Gray)),
                     "repost" => Span::styled("🔁", Style::default().fg(Color::Green)),
                     "like" => Span::styled("❤", Style::default().fg(Color::Red)),
@@ -348,26 +350,27 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     Err(_) => "".into(),
                 };
 
-                let subject = match (reason.as_str(), &notification.record) {
-                    ("reply", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => {
-                        Some(r.text.clone())
+                // fixme
+                let subject = match reason {
+                    "reply" | "mention" | "quote" => {
+                        if let Ok(r) = post::Record::try_from_unknown(notification.record.clone()) {
+                            Some(r.text.clone())
+                        } else {
+                            None
+                        }
                     }
-                    ("repost", Record::Known(records::KnownRecord::AppBskyFeedRepost(r))) => {
-                        bsky::get_url(my_handle.clone(), r.subject.uri.clone())
-                    }
-                    ("like", Record::Known(records::KnownRecord::AppBskyFeedLike(r))) => {
-                        bsky::get_url(my_handle.clone(), r.subject.uri.clone())
-                    }
-                    ("mention", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => {
-                        Some(r.text.clone())
-                    }
-                    ("quote", Record::Known(records::KnownRecord::AppBskyFeedPost(r))) => {
-                        Some(r.text.clone())
+                    "like" | "repost" => {
+                        if let Ok(r) = repost::Record::try_from_unknown(notification.record.clone())
+                        {
+                            bsky::get_url(my_handle.clone(), r.subject.uri.clone())
+                        } else {
+                            None
+                        }
                     }
                     _ => None,
                 };
 
-                let reason_subject = match reason.as_str() {
+                let reason_subject = match reason {
                     "reply" => "replied to your post",
                     "repost" => "reposted your post",
                     "like" => "liked your post",
@@ -386,7 +389,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle.to_string(), duration_text),
+                                format!("@{} {}", handle, duration_text),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -401,11 +404,11 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                         Line::from(vec![
                             reason_icon,
                             Span::styled(
-                                format!(" {} ", display_name),
+                                format!(" {display_name} "),
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle.to_string(), duration_text),
+                                format!("@{handle} {duration_text}"),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -432,7 +435,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
                     "Notifications ({})",
-                    state.get_notifications().unwrap_or(vec![]).len()
+                    state.get_notifications().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),
         )
@@ -467,17 +470,19 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         .display_name
         .clone()
         .unwrap_or_else(|| "".into());
-    let handle = current_feed.post.author.handle.clone();
-    let parent_text = match current_feed.post.record {
-        Record::Known(records::KnownRecord::AppBskyFeedPost(post)) => post.text.clone(),
-        _ => "".into(),
-    };
+    let handle = current_feed.post.author.handle.to_string();
+    let parent_text =
+        if let Ok(post) = post::Record::try_from_unknown(current_feed.post.record.clone()) {
+            post.text.clone()
+        } else {
+            "".to_string()
+        };
     let reply_count = current_feed.post.reply_count.unwrap_or(0);
     let repost_count = current_feed.post.repost_count.unwrap_or(0);
     let like_count = current_feed.post.like_count.unwrap_or(0);
 
     Paragraph::new(vec![
-        Line::from(format!("{} @{}", display_name, handle.to_string())),
+        Line::from(format!("{display_name} @{handle}")),
         Line::from(parent_text),
         Line::from(vec![
             Span::styled(
@@ -508,7 +513,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
-    let titles = vec![Tab::Home, Tab::Notifications]
+    let titles: Vec<_> = [Tab::Home, Tab::Notifications]
         .iter()
         .map(|t| format!("{}", t))
         .collect();

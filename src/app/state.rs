@@ -5,10 +5,11 @@ use atrium_api::app::bsky::{
     feed::defs::FeedViewPost, notification::list_notifications::Notification,
 };
 use atrium_api::types::string::{Did, Handle};
+use bsky_sdk::BskyAgent;
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
-use crate::{app::config::AppConfig, bsky};
+use crate::app::config::AppConfig;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -46,11 +47,12 @@ impl fmt::Display for Tab {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum AppState {
     Init,
     Initialized {
-        agent: Arc<bsky::Agent>,
+        agent: Arc<BskyAgent>,
         timeline: Option<Vec<FeedViewPost>>,
         notifications: Option<Vec<Notification>>,
         input: Input,
@@ -69,7 +71,7 @@ pub enum AppState {
 }
 
 impl AppState {
-    pub fn initialized(agent: bsky::Agent, handle: Handle, did: Did, config: AppConfig) -> Self {
+    pub fn initialized(agent: BskyAgent, handle: Handle, did: Did, config: AppConfig) -> Self {
         let agent = Arc::new(agent);
         Self::Initialized {
             agent,
@@ -102,7 +104,7 @@ impl AppState {
         }
     }
 
-    pub fn get_agent(&self) -> Option<Arc<bsky::Agent>> {
+    pub fn get_agent(&self) -> Option<Arc<BskyAgent>> {
         if let Self::Initialized { agent, .. } = self {
             Some(agent.clone())
         } else {

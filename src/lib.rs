@@ -39,7 +39,12 @@ pub async fn start_ui(
     if !skip_splash {
         let mut split_splash: Vec<String> = splash.split('\n').map(|s| s.to_string()).collect();
         while !split_splash.is_empty() {
-            terminal.draw(|rect| ui::render_splash(rect, split_splash.join("\n")))?;
+            terminal.draw(|rect| {
+                ui::render_splash::<CrosstermBackend<std::io::Stdout>>(
+                    rect,
+                    split_splash.join("\n"),
+                )
+            })?;
 
             loop {
                 let app = app.lock().await;
@@ -56,7 +61,7 @@ pub async fn start_ui(
     loop {
         let mut app = app.lock().await;
 
-        terminal.draw(|rect| ui::render(rect, &app))?;
+        terminal.draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, &app))?;
 
         let result = match events.next().await {
             InputEvent::Input(key) => app.do_action(key).await,
