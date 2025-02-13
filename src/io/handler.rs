@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use atrium_api::{app::bsky::feed::post::ReplyRef, com::atproto::repo::strong_ref};
+use atrium_api::app::bsky::feed::post::ReplyRefData;
+use atrium_api::com::atproto::repo::strong_ref;
 use eyre::Result;
 use tui_input::Input;
 
@@ -42,7 +43,7 @@ impl IoAsyncHandler {
                 bsky::agent_with_session(config.email.clone(), config.password.clone()).await?;
             let session =
                 bsky::session(&agent, config.email.clone(), config.password.clone()).await?;
-            app.initialized(agent, session.handle, session.did, config);
+            app.initialized(agent, session.handle.clone(), session.did.clone(), config);
         }
         self.do_load_timeline(TimelineEvent::Load).await?;
 
@@ -81,17 +82,17 @@ impl IoAsyncHandler {
         {
             let timeline = bsky::timeline(&agent, cursor).await?;
             let mut app = self.app.lock().await;
-            app.state.set_timeline(Some(timeline.feed));
+            app.state.set_timeline(Some(timeline.feed.clone()));
 
             match event {
                 TimelineEvent::Load => {
                     let mut cursors = app.state.get_cursors().clone();
-                    cursors.push(timeline.cursor);
+                    cursors.push(timeline.cursor.clone());
                     app.state.set_cursors(cursors);
                 }
                 TimelineEvent::Next => {
                     let mut cursors = app.state.get_cursors().clone();
-                    cursors.push(timeline.cursor);
+                    cursors.push(timeline.cursor.clone());
                     app.state.set_cursors(cursors);
                     app.state
                         .set_tl_current_cursor_index(current_cursor_index + 1);
@@ -144,7 +145,7 @@ impl IoAsyncHandler {
         let notifications = bsky::notifications(&agent).await?;
         let mut app = self.app.lock().await;
         app.state
-            .set_notifications(Some(notifications.notifications));
+            .set_notifications(Some(notifications.notifications.clone()));
 
         Ok(())
     }
@@ -206,15 +207,17 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_input().value().to_string()
         };
-        let reply = ReplyRef {
-            root: strong_ref::Main {
+        let reply = ReplyRefData {
+            root: strong_ref::MainData {
                 cid: current_feed.post.cid.clone(),
                 uri: current_feed.post.uri.clone(),
-            },
-            parent: strong_ref::Main {
+            }
+            .into(),
+            parent: strong_ref::MainData {
                 cid: current_feed.post.cid.clone(),
                 uri: current_feed.post.uri.clone(),
-            },
+            }
+            .into(),
         };
 
         {
@@ -223,7 +226,7 @@ impl IoAsyncHandler {
             app.state.set_input(Input::default());
         }
 
-        bsky::send_post(&agent, did, text, Some(reply)).await?;
+        bsky::send_post(&agent, did, text, Some(reply.into())).await?;
         self.do_load_timeline(TimelineEvent::Load).await?;
 
         Ok(())

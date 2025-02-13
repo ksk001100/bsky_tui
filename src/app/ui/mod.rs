@@ -1,15 +1,15 @@
 mod draw;
 mod layout;
 
+use crate::app::{state::Tab, App};
+use ratatui::layout::Position;
 use ratatui::{backend::Backend, widgets::Clear, Frame};
 
-use crate::app::{state::Tab, App};
-
-pub fn render<B>(f: &mut Frame<B>, app: &App)
+pub fn render<B>(f: &mut Frame, app: &App)
 where
     B: Backend,
 {
-    let size = f.size();
+    let size = f.area();
 
     let main_chunks = layout::main(size);
     let header_chunks = layout::header(main_chunks[0]);
@@ -69,10 +69,10 @@ where
         let area = layout::input_popup(size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
-        f.set_cursor(
+        f.set_cursor_position(Position::new(
             area.x + 2 + app.state.get_input().visual_cursor() as u16,
             area.y + 2,
-        );
+        ));
     }
 
     if app.state.is_reply_mode() {
@@ -80,18 +80,18 @@ where
         let area = layout::reply_popup(size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
-        f.set_cursor(
+        f.set_cursor_position(Position::new(
             area.x + 2 + app.state.get_input().visual_cursor() as u16,
             area.y + 6,
-        );
+        ));
     }
 }
 
-pub fn render_splash<B>(f: &mut Frame<B>, splash_text: String)
+pub fn render_splash<B>(f: &mut Frame, splash_text: String)
 where
     B: Backend,
 {
-    let size = f.size();
+    let size = f.area();
     let popup = draw::splash(splash_text);
     let area = layout::popup(60, 60, size);
     f.render_widget(Clear, area);

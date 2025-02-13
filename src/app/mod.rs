@@ -6,11 +6,11 @@ use self::state::AppState;
 use crate::io::TimelineEvent;
 use crate::{
     app::{config::AppConfig, state::Tab},
-    bsky,
     inputs::key::Key,
     io::IoEvent,
 };
 use atrium_api::types::string::{Did, Handle};
+use bsky_sdk::BskyAgent;
 use tui_input::{Input, InputRequest};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -88,7 +88,7 @@ impl App {
             Key::Enter => {
                 if let Some(feed) = self.state.get_current_feed() {
                     if let Some(id) = feed.post.uri.split('/').last() {
-                        let handle = feed.post.author.handle;
+                        let handle = &feed.post.author.handle;
                         let url =
                             format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
                         let _ = webbrowser::open(&url).is_ok();
@@ -251,7 +251,7 @@ impl App {
         self.is_loading
     }
 
-    pub fn initialized(&mut self, agent: bsky::Agent, handle: Handle, did: Did, config: AppConfig) {
+    pub fn initialized(&mut self, agent: BskyAgent, handle: Handle, did: Did, config: AppConfig) {
         self.state = AppState::initialized(agent, handle, did, config);
     }
 
