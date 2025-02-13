@@ -47,6 +47,7 @@ impl fmt::Display for Tab {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum AppState {
     Init,

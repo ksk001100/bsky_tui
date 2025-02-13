@@ -243,12 +243,8 @@ pub async fn toggle_repost(agent: &BskyAgent, did: Did, feed: defs::FeedViewPost
 
 pub fn get_url(handle: Handle, uri: String) -> Option<String> {
     if let Some(id) = uri.split('/').last() {
-        let url = format!(
-            "https://bsky.app/profile/{}/post/{}",
-            handle.to_string(),
-            id
-        );
-        Some(url.clone())
+        let handle = handle.to_string();
+        Some(format!("https://bsky.app/profile/{handle}/post/{id}"))
     } else {
         None
     }

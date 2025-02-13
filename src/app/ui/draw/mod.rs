@@ -249,7 +249,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                     .display_name
                     .clone()
                     .unwrap_or_else(|| "".into());
-                let handle = post.author.handle.clone();
+                let handle = post.author.handle.to_string();
                 let reply_count = post.reply_count.unwrap_or(0);
                 let repost_count = post.repost_count.unwrap_or(0);
                 let like_count = post.like_count.unwrap_or(0);
@@ -261,11 +261,11 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 let item = vec![
                     Line::from(vec![
                         Span::styled(
-                            format!("{} ", display_name),
+                            format!("{display_name} "),
                             Style::default().fg(Color::White),
                         ),
                         Span::styled(
-                            format!("@{} {}", handle.to_string(), duration_text),
+                            format!("@{handle} {duration_text}"),
                             Style::default().fg(Color::Gray),
                         ),
                     ]),
@@ -306,7 +306,7 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                 .title(format!(
                     "Home ({}: {})",
                     state.get_tl_current_cursor_index() + 1,
-                    state.get_timeline().unwrap_or(vec![]).len()
+                    state.get_timeline().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),
         )
@@ -322,7 +322,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
         Some(notifications) => notifications
             .iter()
             .map(|notification| {
-                let handle = notification.author.handle.clone();
+                let handle = notification.author.handle.to_string();
                 let display_name = notification
                     .author
                     .display_name
@@ -389,7 +389,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle.to_string(), duration_text),
+                                format!("@{} {}", handle, duration_text),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -404,11 +404,11 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                         Line::from(vec![
                             reason_icon,
                             Span::styled(
-                                format!(" {} ", display_name),
+                                format!(" {display_name} "),
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle.to_string(), duration_text),
+                                format!("@{handle} {duration_text}"),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -435,7 +435,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
                     "Notifications ({})",
-                    state.get_notifications().unwrap_or(vec![]).len()
+                    state.get_notifications().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),
         )
@@ -470,7 +470,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         .display_name
         .clone()
         .unwrap_or_else(|| "".into());
-    let handle = current_feed.post.author.handle.clone();
+    let handle = current_feed.post.author.handle.to_string();
     let parent_text = "".to_string();
     // match current_feed.post.record {
     //     Record::Known(records::KnownRecord::AppBskyFeedPost(post)) => post.text.clone(),
@@ -481,7 +481,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     let like_count = current_feed.post.like_count.unwrap_or(0);
 
     Paragraph::new(vec![
-        Line::from(format!("{} @{}", display_name, handle.to_string())),
+        Line::from(format!("{display_name} @{handle}")),
         Line::from(parent_text),
         Line::from(vec![
             Span::styled(
@@ -512,7 +512,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
-    let titles: Vec<_> = vec![Tab::Home, Tab::Notifications]
+    let titles: Vec<_> = [Tab::Home, Tab::Notifications]
         .iter()
         .map(|t| format!("{}", t))
         .collect();
