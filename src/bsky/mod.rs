@@ -1,7 +1,7 @@
 use atrium_api::record::KnownRecord;
 use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid};
 use atrium_api::{
-    agent::{store::MemorySessionStore, AtpAgent},
+    agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
         feed::{defs, get_timeline, post},
         notification,
