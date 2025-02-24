@@ -35,7 +35,6 @@ async fn action(_c: &Context) {
         return;
     }
 
-    console_subscriber::init();
     let (sync_io_tx, mut sync_io_rx) = tokio::sync::mpsc::channel::<IoEvent>(100);
 
     let app = Arc::new(tokio::sync::Mutex::new(App::new(sync_io_tx.clone())));
