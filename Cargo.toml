@@ -10,7 +10,7 @@ readme = "README.md"
 description = "Bluesky TUI Client"
 
 [dependencies]
-crossterm = "0.25"
+crossterm = "0.28"
 eyre = "0.6"
 seahorse = "2.2"
 tokio = { version = "1", features = ["full"] }
