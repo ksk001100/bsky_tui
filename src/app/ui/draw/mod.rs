@@ -21,9 +21,9 @@ pub fn title<'a>() -> Paragraph<'a> {
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     ))
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(Block::default().style(Style::default().fg(Color::White)))
+    .style(Style::default().fg(Color::LightCyan))
+    .alignment(Alignment::Center)
+    .block(Block::default().style(Style::default().fg(Color::White)))
 }
 
 pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
@@ -215,14 +215,14 @@ pub fn help<'a>() -> Table<'a> {
             Constraint::Percentage(80),
         ],
     )
-        .block(
-            Block::default()
-                .title("Help")
-                .borders(Borders::ALL)
-                .style(Style::default().fg(Color::White).bg(Color::Black))
-                .border_type(BorderType::Plain),
-        )
-        .column_spacing(1)
+    .block(
+        Block::default()
+            .title("Help")
+            .borders(Borders::ALL)
+            .style(Style::default().fg(Color::White).bg(Color::Black))
+            .border_type(BorderType::Plain),
+    )
+    .column_spacing(1)
 }
 
 pub fn timeline<'a>(state: &AppState) -> List<'a> {
@@ -500,15 +500,15 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         Line::from(""),
         Line::from(text),
     ])
-        .style(Style::default().fg(Color::White).bg(Color::Black))
-        .alignment(Alignment::Left)
-        .block(
-            Block::default()
-                .style(Style::default().fg(Color::White))
-                .borders(Borders::ALL)
-                .title("Reply")
-                .padding(Padding::new(1, 1, 1, 1)),
-        )
+    .style(Style::default().fg(Color::White).bg(Color::Black))
+    .alignment(Alignment::Left)
+    .block(
+        Block::default()
+            .style(Style::default().fg(Color::White))
+            .borders(Borders::ALL)
+            .title("Reply")
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {

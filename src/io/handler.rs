@@ -237,12 +237,12 @@ impl IoAsyncHandler {
                 cid: current_feed.post.cid.clone(),
                 uri: current_feed.post.uri.clone(),
             }
-                .into(),
+            .into(),
             parent: strong_ref::MainData {
                 cid: current_feed.post.cid.clone(),
                 uri: current_feed.post.uri.clone(),
             }
-                .into(),
+            .into(),
         };
 
         {

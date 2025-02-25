@@ -173,7 +173,12 @@ impl AppState {
     }
 
     pub fn move_tl_scroll_top(&mut self) {
-        if let Self::Initialized { tl_list_state, tl_list_position, .. } = self {
+        if let Self::Initialized {
+            tl_list_state,
+            tl_list_position,
+            ..
+        } = self
+        {
             *tl_list_position = 0;
             tl_list_state.select(Some(0));
         }
