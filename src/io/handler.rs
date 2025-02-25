@@ -51,6 +51,20 @@ impl IoAsyncHandler {
     }
 
     async fn do_load_timeline(&mut self, event: TimelineEvent) -> Result<()> {
+        let current_cursor_index = {
+            let app = self.app.lock().await;
+            app.state.get_tl_current_cursor_index()
+        };
+
+        if current_cursor_index == 0 && event == TimelineEvent::Prev {
+            return Ok(());
+        }
+
+        {
+            let mut app = self.app.lock().await;
+            app.state.set_loading(true);
+        }
+
         let agent = {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
@@ -96,7 +110,6 @@ impl IoAsyncHandler {
                     app.state.set_cursors(cursors);
                     app.state
                         .set_tl_current_cursor_index(current_cursor_index + 1);
-                    app.state.move_tl_scroll_top();
                 }
                 TimelineEvent::Prev => {
                     if current_cursor_index == 0 {
@@ -104,10 +117,16 @@ impl IoAsyncHandler {
                     }
                     app.state
                         .set_tl_current_cursor_index(current_cursor_index - 1);
-                    app.state.move_tl_scroll_top();
                 }
                 _ => (),
             }
+
+            app.state.move_tl_scroll_top();
+        }
+
+        {
+            let mut app = self.app.lock().await;
+            app.state.set_loading(false);
         }
 
         Ok(())
@@ -138,6 +157,11 @@ impl IoAsyncHandler {
     }
 
     async fn do_load_notifications(&mut self) -> Result<()> {
+        {
+            let mut app = self.app.lock().await;
+            app.state.set_loading(true);
+        }
+
         let agent = {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
@@ -146,6 +170,7 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         app.state
             .set_notifications(Some(notifications.notifications.clone()));
+        app.state.set_loading(false);
 
         Ok(())
     }
@@ -212,12 +237,12 @@ impl IoAsyncHandler {
                 cid: current_feed.post.cid.clone(),
                 uri: current_feed.post.uri.clone(),
             }
-            .into(),
+                .into(),
             parent: strong_ref::MainData {
                 cid: current_feed.post.cid.clone(),
                 uri: current_feed.post.uri.clone(),
             }
-            .into(),
+                .into(),
         };
 
         {

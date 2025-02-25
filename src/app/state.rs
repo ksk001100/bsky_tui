@@ -67,6 +67,7 @@ pub enum AppState {
         config: Box<AppConfig>,
         tl_current_cursor_index: usize,
         cursors: Vec<Option<String>>,
+        is_loading: bool,
     },
 }
 
@@ -89,6 +90,7 @@ impl AppState {
             config: Box::new(config),
             tl_current_cursor_index: 0,
             cursors: vec![None],
+            is_loading: false,
         }
     }
 
@@ -171,7 +173,8 @@ impl AppState {
     }
 
     pub fn move_tl_scroll_top(&mut self) {
-        if let Self::Initialized { tl_list_state, .. } = self {
+        if let Self::Initialized { tl_list_state, tl_list_position, .. } = self {
+            *tl_list_position = 0;
             tl_list_state.select(Some(0));
         }
     }
@@ -461,6 +464,20 @@ impl AppState {
             cursors.get(*tl_current_cursor_index - 1).cloned().unwrap()
         } else {
             None
+        }
+    }
+
+    pub fn set_loading(&mut self, is_loading: bool) {
+        if let Self::Initialized { is_loading: l, .. } = self {
+            *l = is_loading;
+        }
+    }
+
+    pub fn is_loading(&self) -> bool {
+        if let Self::Initialized { is_loading, .. } = self {
+            *is_loading
+        } else {
+            false
         }
     }
 }

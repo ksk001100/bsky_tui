@@ -24,38 +24,33 @@ where
     let tabs = draw::tabs(app.state());
     f.render_widget(tabs, body_chunks[0]);
 
-    match app.state.get_tab() {
-        Tab::Home => {
-            if app.state.get_timeline().is_none() {
-                let popup = draw::loading();
-                let area = layout::popup(60, 20, size);
-                f.render_widget(Clear, area);
-                f.render_widget(popup, area);
+    if app.state.is_loading() {
+        let popup = draw::loading();
+        let area = layout::popup(60, 20, size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+    } else {
+        match app.state.get_tab() {
+            Tab::Home => {
+                let body = draw::timeline(app.state());
+                app.state
+                    .get_tl_list_state()
+                    .select(Some(app.state.get_tl_list_position()));
+                f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
             }
-            let body = draw::timeline(app.state());
-            app.state
-                .get_tl_list_state()
-                .select(Some(app.state.get_tl_list_position()));
-            f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
-        }
-        Tab::Notifications => {
-            if app.state.get_notifications().is_none() {
-                let popup = draw::loading();
-                let area = layout::popup(60, 20, size);
-                f.render_widget(Clear, area);
-                f.render_widget(popup, area);
+            Tab::Notifications => {
+                let body = draw::notifications(app.state());
+                app.state
+                    .get_notifications_list_state()
+                    .select(Some(app.state.get_notifications_list_position()));
+                f.render_stateful_widget(
+                    body,
+                    body_chunks[1],
+                    &mut app.state.get_notifications_list_state(),
+                );
             }
-            let body = draw::notifications(app.state());
-            app.state
-                .get_notifications_list_state()
-                .select(Some(app.state.get_notifications_list_position()));
-            f.render_stateful_widget(
-                body,
-                body_chunks[1],
-                &mut app.state.get_notifications_list_state(),
-            );
-        }
-    };
+        };
+    }
 
     if app.state.is_help_mode() {
         let popup = draw::help();
