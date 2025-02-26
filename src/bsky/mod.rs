@@ -71,7 +71,7 @@ pub async fn search(
                 lang: None,
                 mentions: None,
                 since: None,
-                sort: None,
+                sort: Some("latest".to_string()),
                 tag: None,
                 until: None,
                 url: None,
@@ -286,4 +286,36 @@ pub fn get_url(handle: Handle, uri: String) -> Option<String> {
 
 pub fn uri_to_rkey(uri: String) -> Option<String> {
     uri.split('/').last().map(|s| s.to_string())
+}
+
+pub async fn toggle_like_post_view(
+    agent: &BskyAgent,
+    did: Did,
+    post: defs::PostViewData,
+) -> Result<()> {
+    if let Some(viewer) = &post.viewer {
+        if let Some(like) = &viewer.like {
+            unlike(agent, did, uri_to_rkey(like.clone()).unwrap()).await?;
+        } else {
+            like(agent, did, post.cid.clone(), post.uri.clone()).await?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn toggle_repost_post_view(
+    agent: &BskyAgent,
+    did: Did,
+    post: defs::PostViewData,
+) -> Result<()> {
+    if let Some(viewer) = &post.viewer {
+        if let Some(repost) = &viewer.repost {
+            unrepost(agent, did, uri_to_rkey(repost.clone()).unwrap()).await?;
+        } else {
+            repost(agent, did, post.cid.clone(), post.uri.clone()).await?;
+        }
+    }
+
+    Ok(())
 }

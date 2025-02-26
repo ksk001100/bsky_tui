@@ -64,8 +64,12 @@ impl App {
                 AppReturn::Continue
             }
             Key::Char('N') => {
-                self.state.set_mode(state::Mode::Reply);
-                AppReturn::Continue
+                if self.state.get_current_search_result().is_some() {
+                    self.state.set_mode(state::Mode::Reply);
+                    AppReturn::Continue
+                } else {
+                    AppReturn::Continue
+                }
             }
             Key::Ctrl('r') => {
                 self.dispatch(IoEvent::Repost).await;
@@ -176,6 +180,22 @@ impl App {
     async fn search_action(&mut self, key: Key) -> AppReturn {
         match key {
             Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
+            Key::Char('r') => {
+                self.dispatch(IoEvent::Search(SearchEvent::Reload)).await;
+                AppReturn::Continue
+            }
+            Key::Char('N') => {
+                self.state.set_mode(state::Mode::Reply);
+                AppReturn::Continue
+            }
+            Key::Ctrl('r') => {
+                self.dispatch(IoEvent::SearchRepost).await;
+                AppReturn::Continue
+            }
+            Key::Ctrl('l') => {
+                self.dispatch(IoEvent::SearchLike).await;
+                AppReturn::Continue
+            }
             Key::Char('?') => {
                 self.state.set_mode(state::Mode::Help);
                 AppReturn::Continue
@@ -342,7 +362,15 @@ impl App {
                 AppReturn::Continue
             }
             Key::Enter => {
-                self.dispatch(IoEvent::Reply).await;
+                match self.state.get_tab() {
+                    Tab::Home => {
+                        self.dispatch(IoEvent::Reply).await;
+                    }
+                    Tab::Search => {
+                        self.dispatch(IoEvent::SearchReply).await;
+                    }
+                    _ => {}
+                }
                 AppReturn::Continue
             }
             Key::Left | Key::Ctrl('b') => {

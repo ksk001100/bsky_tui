@@ -29,6 +29,9 @@ impl IoAsyncHandler {
             IoEvent::Repost => self.do_repost().await,
             IoEvent::Reply => self.do_reply().await,
             IoEvent::Search(action) => self.do_search(action).await,
+            IoEvent::SearchLike => self.do_search_like().await,
+            IoEvent::SearchRepost => self.do_search_repost().await,
+            IoEvent::SearchReply => self.do_search_reply().await,
         };
 
         let mut app = self.app.lock().await;
@@ -356,6 +359,88 @@ impl IoAsyncHandler {
 
         bsky::send_post(&agent, did, text, Some(reply.into())).await?;
         self.do_load_timeline(TimelineEvent::Load).await?;
+
+        Ok(())
+    }
+
+    async fn do_search_like(&mut self) -> Result<()> {
+        let agent = {
+            let app = self.app.lock().await;
+            app.state.get_agent().unwrap()
+        };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
+        };
+        let current_post = {
+            let app = self.app.lock().await;
+            app.state.get_current_search_result().unwrap()
+        };
+
+        bsky::toggle_like_post_view(&agent, did, current_post).await?;
+        self.do_search(SearchEvent::Reload).await?;
+
+        Ok(())
+    }
+
+    async fn do_search_repost(&mut self) -> Result<()> {
+        let agent = {
+            let app = self.app.lock().await;
+            app.state.get_agent().unwrap()
+        };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
+        };
+        let current_post = {
+            let app = self.app.lock().await;
+            app.state.get_current_search_result().unwrap()
+        };
+
+        bsky::toggle_repost_post_view(&agent, did, current_post).await?;
+        self.do_search(SearchEvent::Reload).await?;
+
+        Ok(())
+    }
+
+    async fn do_search_reply(&mut self) -> Result<()> {
+        let agent = {
+            let app = self.app.lock().await;
+            app.state.get_agent().unwrap()
+        };
+        let did = {
+            let app = self.app.lock().await;
+            app.state.get_did()
+        };
+        let current_post = {
+            let app = self.app.lock().await;
+            app.state.get_current_search_result().unwrap()
+        };
+        let text = {
+            let app = self.app.lock().await;
+            app.state.get_input().value().to_string()
+        };
+        let reply = ReplyRefData {
+            root: strong_ref::MainData {
+                cid: current_post.cid.clone(),
+                uri: current_post.uri.clone(),
+            }
+            .into(),
+            parent: strong_ref::MainData {
+                cid: current_post.cid.clone(),
+                uri: current_post.uri.clone(),
+            }
+            .into(),
+        };
+
+        {
+            let mut app = self.app.lock().await;
+            app.state.set_mode(Mode::Normal);
+            app.state.set_input(Input::default());
+        }
+
+        bsky::send_post(&agent, did, text, Some(reply.into())).await?;
+        self.do_search(SearchEvent::Reload).await?;
 
         Ok(())
     }

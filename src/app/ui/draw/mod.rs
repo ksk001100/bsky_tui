@@ -90,7 +90,7 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home/Notifications"),
+            Cell::from("Home/Notifications/Search"),
             Cell::from("r"),
             Cell::from("Reload list"),
         ]),
@@ -132,13 +132,13 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home"),
+            Cell::from("Home/Search"),
             Cell::from("l, Right"),
             Cell::from("Next page"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home"),
+            Cell::from("Home/Search"),
             Cell::from("h, Left"),
             Cell::from("Prev page"),
         ]),
@@ -150,13 +150,13 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home"),
+            Cell::from("Home/Search"),
             Cell::from("Ctrl+r"),
             Cell::from("Repost selected post (unrepost if already reposted)"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home"),
+            Cell::from("Home/Search"),
             Cell::from("Ctrl+l"),
             Cell::from("Like selected post (unlike if already liked)"),
         ]),

@@ -10,6 +10,9 @@ pub enum IoEvent {
     Repost,
     Reply,
     Search(SearchEvent),
+    SearchLike,
+    SearchRepost,
+    SearchReply,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
