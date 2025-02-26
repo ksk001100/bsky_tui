@@ -7,7 +7,7 @@ use tui_input::Input;
 
 use super::{IoEvent, TimelineEvent};
 use crate::{
-    app::{config::AppConfig, state::Mode, App},
+    app::{config::AppConfig, state::Mode, state::Tab, App},
     bsky,
 };
 
@@ -29,6 +29,7 @@ impl IoAsyncHandler {
             IoEvent::Like => self.do_like().await,
             IoEvent::Repost => self.do_repost().await,
             IoEvent::Reply => self.do_reply().await,
+            IoEvent::Search(query) => self.do_search(query).await,
         };
 
         let mut app = self.app.lock().await;
@@ -170,6 +171,32 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         app.state
             .set_notifications(Some(notifications.notifications.clone()));
+        app.state.set_loading(false);
+
+        Ok(())
+    }
+
+    async fn do_search(&mut self, query: String) -> Result<()> {
+        {
+            let mut app = self.app.lock().await;
+            app.state.set_loading(true);
+        }
+
+        let agent = {
+            let app = self.app.lock().await;
+            app.state.get_agent().unwrap()
+        };
+        let search_results = bsky::search(&agent, query).await?;
+        let mut app = self.app.lock().await;
+        app.state.set_search_results(Some(
+            search_results
+                .posts
+                .iter()
+                .map(|post| post.data.clone())
+                .collect(),
+        ));
+        app.state.set_tab(Tab::Search);
+        app.state.move_search_scroll_top();
         app.state.set_loading(false);
 
         Ok(())

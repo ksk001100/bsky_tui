@@ -49,6 +49,17 @@ where
                     &mut app.state.get_notifications_list_state(),
                 );
             }
+            Tab::Search => {
+                let body = draw::search_results(app.state());
+                app.state
+                    .get_search_list_state()
+                    .select(Some(app.state.get_search_list_position()));
+                f.render_stateful_widget(
+                    body,
+                    body_chunks[1],
+                    &mut app.state.get_search_list_state(),
+                );
+            }
         };
     }
 
@@ -78,6 +89,17 @@ where
         f.set_cursor_position(Position::new(
             area.x + 2 + app.state.get_input().visual_cursor() as u16,
             area.y + 6,
+        ));
+    }
+
+    if app.state.is_search_mode() {
+        let popup = draw::search_input(app.state());
+        let area = layout::input_popup(size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+        f.set_cursor_position(Position::new(
+            area.x + 2 + app.state.get_input().visual_cursor() as u16,
+            area.y + 2,
         ));
     }
 }

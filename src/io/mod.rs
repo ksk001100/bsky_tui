@@ -9,6 +9,7 @@ pub enum IoEvent {
     Like,
     Repost,
     Reply,
+    Search(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

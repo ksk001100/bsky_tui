@@ -78,13 +78,13 @@ pub fn help<'a>() -> Table<'a> {
         // Normal mode
         Row::new(vec![
             Cell::from("Normal Mode"),
-            Cell::from("Home/Notifications"),
+            Cell::from("Home/Notifications/Search"),
             Cell::from("Tab"),
             Cell::from("Change tab"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home/Notifications"),
+            Cell::from("Home/Notifications/Search"),
             Cell::from("q, Ctrl+c, Esc"),
             Cell::from("Quit"),
         ]),
@@ -96,9 +96,15 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home/Notifications"),
+            Cell::from("Home/Notifications/Search"),
             Cell::from("?"),
             Cell::from("Show help popup"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Notifications/Search"),
+            Cell::from("/"),
+            Cell::from("Search mode"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -114,13 +120,13 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home/Notifications"),
+            Cell::from("Home/Notifications/Search"),
             Cell::from("j, Ctrl+n, Down"),
             Cell::from("Select next post"),
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home/Notifications"),
+            Cell::from("Home/Notifications/Search"),
             Cell::from("k, Ctrl+p, Up"),
             Cell::from("Select previous post"),
         ]),
@@ -138,7 +144,7 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         Row::new(vec![
             Cell::from(""),
-            Cell::from("Home"),
+            Cell::from("Home/Search"),
             Cell::from("Enter"),
             Cell::from("Selected post open in browser"),
         ]),
@@ -156,7 +162,7 @@ pub fn help<'a>() -> Table<'a> {
         ]),
         // Post mode
         Row::new(vec![
-            Cell::from("Post/Reply"),
+            Cell::from("Post/Reply/Search"),
             Cell::from(""),
             Cell::from("Esc"),
             Cell::from("Return to normal mode"),
@@ -165,7 +171,7 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from(""),
             Cell::from(""),
             Cell::from("Enter"),
-            Cell::from("Send post"),
+            Cell::from("Send post/reply/search"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -306,6 +312,90 @@ pub fn timeline<'a>(state: &AppState) -> List<'a> {
                     "Home ({}: {})",
                     state.get_tl_current_cursor_index() + 1,
                     state.get_timeline().unwrap_or_default().len()
+                ))
+                .border_type(BorderType::Plain),
+        )
+}
+
+pub fn search_results<'a>(state: &AppState) -> List<'a> {
+    let search_results = state.get_search_results();
+    let size = crossterm::terminal::size().unwrap();
+    let border = "=".repeat((size.0 - 4) as usize);
+
+    let list_items: Vec<ListItem> = match search_results {
+        Some(feeds) => feeds
+            .iter()
+            .map(|feed| {
+                let post = &feed;
+                let (text, created_at) =
+                    if let Ok(r) = post::Record::try_from_unknown(post.record.clone()) {
+                        let c = &r.created_at;
+                        (r.text.clone(), format!("{:?}+0000", c))
+                    } else {
+                        ("".into(), "".into())
+                    };
+                let display_name = post
+                    .author
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| "".into());
+                let handle = post.author.handle.to_string();
+                let reply_count = post.reply_count.unwrap_or(0);
+                let repost_count = post.repost_count.unwrap_or(0);
+                let like_count = post.like_count.unwrap_or(0);
+                let duration_text =
+                    match DateTime::parse_from_str(&created_at, "%Y-%m-%dT%H:%M:%S%z") {
+                        Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
+                        Err(_) => "".into(),
+                    };
+                let item = vec![
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{display_name} "),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::styled(
+                            format!("@{handle} {duration_text}"),
+                            Style::default().fg(Color::Gray),
+                        ),
+                    ]),
+                    Line::from(text),
+                    Line::from(vec![
+                        Span::styled(
+                            format!("↩ {}", reply_count),
+                            Style::default().fg(Color::Gray),
+                        ),
+                        Span::styled(
+                            format!("   🔁 {}", repost_count),
+                            Style::default().fg(Color::Green),
+                        ),
+                        Span::styled(
+                            format!("   ❤ {}", like_count),
+                            Style::default().fg(Color::Red),
+                        ),
+                    ]),
+                    Line::from(Span::styled(
+                        border.clone(),
+                        Style::default().fg(Color::Gray),
+                    )),
+                ];
+
+                ListItem::new(item)
+            })
+            .collect(),
+        None => vec![],
+    };
+
+    List::new(list_items)
+        .highlight_style(Style::default().bg(Color::Blue))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default())
+                .padding(Padding::new(1, 1, 1, 1))
+                .title(format!(
+                    "Search Results ({})",
+                    state.get_search_results().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),
         )
@@ -454,6 +544,20 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
         )
 }
 
+pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
+    let text = state.get_input().value().to_string();
+    Paragraph::new(text)
+        .style(Style::default().fg(Color::White).bg(Color::Black))
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .style(Style::default().fg(Color::White))
+                .borders(Borders::ALL)
+                .title("Search")
+                .padding(Padding::new(1, 1, 1, 1)),
+        )
+}
+
 pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
     let current_feed = state.get_current_feed();
@@ -512,7 +616,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
-    let titles: Vec<_> = [Tab::Home, Tab::Notifications]
+    let titles: Vec<_> = [Tab::Home, Tab::Notifications, Tab::Search]
         .iter()
         .map(|t| format!("{}", t))
         .collect();

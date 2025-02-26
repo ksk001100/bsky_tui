@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use atrium_api::app::bsky::feed::defs::PostViewData;
 use atrium_api::app::bsky::{
     feed::defs::FeedViewPost, notification::list_notifications::Notification,
 };
@@ -17,6 +18,7 @@ pub enum Mode {
     Post,
     Reply,
     Help,
+    Search,
 }
 
 impl fmt::Display for Mode {
@@ -26,6 +28,7 @@ impl fmt::Display for Mode {
             Mode::Post => "Post",
             Mode::Reply => "Reply",
             Mode::Help => "Help",
+            Mode::Search => "Search",
         };
         write!(f, "{}", str)
     }
@@ -35,6 +38,7 @@ impl fmt::Display for Mode {
 pub enum Tab {
     Home,
     Notifications,
+    Search,
 }
 
 impl fmt::Display for Tab {
@@ -42,6 +46,7 @@ impl fmt::Display for Tab {
         let str = match self {
             Tab::Home => "Home",
             Tab::Notifications => "Notifications",
+            Tab::Search => "Search",
         };
         write!(f, "{}", str)
     }
@@ -55,11 +60,14 @@ pub enum AppState {
         agent: Arc<BskyAgent>,
         timeline: Option<Vec<FeedViewPost>>,
         notifications: Option<Vec<Notification>>,
+        search_results: Option<Vec<PostViewData>>,
         input: Input,
         tl_list_state: ListState,
         tl_list_position: usize,
         notifications_list_state: ListState,
         notifications_list_position: usize,
+        search_list_state: ListState,
+        search_list_position: usize,
         handle: Handle,
         did: Did,
         mode: Mode,
@@ -78,11 +86,14 @@ impl AppState {
             agent,
             timeline: None,
             notifications: None,
+            search_results: None,
             input: Input::default(),
             tl_list_state: ListState::default().with_selected(Some(0)),
             tl_list_position: 0,
             notifications_list_state: ListState::default().with_selected(Some(0)),
             notifications_list_position: 0,
+            search_list_state: ListState::default().with_selected(Some(0)),
+            search_list_position: 0,
             handle,
             did,
             mode: Mode::Normal,
@@ -265,6 +276,47 @@ impl AppState {
         }
     }
 
+    pub fn move_search_scroll_up(&mut self) {
+        if let Self::Initialized {
+            search_list_position,
+            search_list_state,
+            ..
+        } = self
+        {
+            if *search_list_position > 0 {
+                *search_list_position -= 1;
+                search_list_state.select(Some(*search_list_position));
+            }
+        }
+    }
+
+    pub fn move_search_scroll_down(&mut self) {
+        if let Self::Initialized {
+            search_list_position,
+            search_list_state,
+            search_results: Some(results),
+            ..
+        } = self
+        {
+            if *search_list_position < results.len() - 1 {
+                *search_list_position += 1;
+                search_list_state.select(Some(*search_list_position));
+            }
+        }
+    }
+
+    pub fn get_search_list_position(&self) -> usize {
+        if let Self::Initialized {
+            search_list_position,
+            ..
+        } = self
+        {
+            *search_list_position
+        } else {
+            0
+        }
+    }
+
     pub fn set_timeline(&mut self, f: Option<Vec<FeedViewPost>>) {
         if let Self::Initialized { timeline, .. } = self {
             *timeline = f;
@@ -274,6 +326,58 @@ impl AppState {
     pub fn get_timeline(&self) -> Option<Vec<FeedViewPost>> {
         if let Self::Initialized { timeline, .. } = self {
             timeline.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn set_search_results(&mut self, f: Option<Vec<PostViewData>>) {
+        if let Self::Initialized { search_results, .. } = self {
+            *search_results = f;
+        }
+    }
+
+    pub fn get_search_results(&self) -> Option<Vec<PostViewData>> {
+        if let Self::Initialized { search_results, .. } = self {
+            search_results.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_search_list_state(&self) -> ListState {
+        if let Self::Initialized {
+            search_list_state, ..
+        } = self
+        {
+            search_list_state.clone()
+        } else {
+            ListState::default()
+        }
+    }
+
+    pub fn move_search_scroll_top(&mut self) {
+        if let Self::Initialized {
+            search_list_state,
+            search_list_position,
+            ..
+        } = self
+        {
+            *search_list_position = 0;
+            search_list_state.select(Some(0));
+        }
+    }
+
+    pub fn get_current_search_result(&self) -> Option<PostViewData> {
+        if let Self::Initialized {
+            search_results,
+            search_list_position,
+            ..
+        } = self
+        {
+            search_results
+                .clone()
+                .and_then(|f| f.get(*search_list_position).cloned())
         } else {
             None
         }
@@ -325,6 +429,14 @@ impl AppState {
         }
     }
 
+    pub fn is_search_mode(&self) -> bool {
+        if let Self::Initialized { mode, .. } = self {
+            matches!(mode, Mode::Search)
+        } else {
+            false
+        }
+    }
+
     pub fn get_tl_list_state(&self) -> ListState {
         if let Self::Initialized { tl_list_state, .. } = self {
             tl_list_state.clone()
@@ -368,11 +480,18 @@ impl AppState {
         }
     }
 
+    pub fn set_tab(&mut self, tab: Tab) {
+        if let Self::Initialized { tab: t, .. } = self {
+            *t = tab;
+        }
+    }
+
     pub fn set_next_tab(&mut self) {
         if let Self::Initialized { tab, .. } = self {
             *tab = match tab {
                 Tab::Home => Tab::Notifications,
-                Tab::Notifications => Tab::Home,
+                Tab::Notifications => Tab::Search,
+                Tab::Search => Tab::Home,
             }
         }
     }

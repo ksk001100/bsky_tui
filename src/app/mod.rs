@@ -42,10 +42,12 @@ impl App {
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => self.timeline_action(key).await,
                 Tab::Notifications => self.notifications_action(key).await,
+                Tab::Search => self.search_action(key).await,
             },
             state::Mode::Post => self.post_action(key).await,
             state::Mode::Reply => self.reply_action(key).await,
             state::Mode::Help => self.help_action(key).await,
+            state::Mode::Search => self.search_input_action(key).await,
         }
     }
 
@@ -77,6 +79,11 @@ impl App {
                 self.state.set_mode(state::Mode::Help);
                 AppReturn::Continue
             }
+            Key::Char('/') => {
+                self.state.set_mode(state::Mode::Search);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
             Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                 self.state.move_tl_scroll_down();
                 AppReturn::Continue
@@ -98,7 +105,16 @@ impl App {
             }
             Key::Tab => {
                 self.state.set_next_tab();
-                self.dispatch(IoEvent::LoadNotifications).await;
+                match self.state.get_tab() {
+                    Tab::Home => {
+                        self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                            .await;
+                    }
+                    Tab::Notifications => {
+                        self.dispatch(IoEvent::LoadNotifications).await;
+                    }
+                    Tab::Search => {}
+                }
                 AppReturn::Continue
             }
             Key::Char('h') | Key::Left => {
@@ -126,6 +142,11 @@ impl App {
                 self.state.set_mode(state::Mode::Help);
                 AppReturn::Continue
             }
+            Key::Char('/') => {
+                self.state.set_mode(state::Mode::Search);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
             Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                 self.state.move_notifications_scroll_down();
                 AppReturn::Continue
@@ -136,8 +157,110 @@ impl App {
             }
             Key::Tab => {
                 self.state.set_next_tab();
-                self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
-                    .await;
+                match self.state.get_tab() {
+                    Tab::Home => {
+                        self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                            .await;
+                    }
+                    Tab::Notifications => {
+                        self.dispatch(IoEvent::LoadNotifications).await;
+                    }
+                    Tab::Search => {}
+                }
+                AppReturn::Continue
+            }
+            _ => AppReturn::Continue,
+        }
+    }
+
+    async fn search_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
+            Key::Char('?') => {
+                self.state.set_mode(state::Mode::Help);
+                AppReturn::Continue
+            }
+            Key::Char('/') => {
+                self.state.set_mode(state::Mode::Search);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
+            Key::Down | Key::Char('j') | Key::Ctrl('n') => {
+                self.state.move_search_scroll_down();
+                AppReturn::Continue
+            }
+            Key::Up | Key::Char('k') | Key::Ctrl('p') => {
+                self.state.move_search_scroll_up();
+                AppReturn::Continue
+            }
+            Key::Enter => {
+                if let Some(feed) = self.state.get_current_search_result() {
+                    if let Some(id) = feed.uri.split('/').last() {
+                        let handle = &feed.author.handle;
+                        let url =
+                            format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
+                        let _ = webbrowser::open(&url).is_ok();
+                    }
+                }
+                AppReturn::Continue
+            }
+            Key::Tab => {
+                self.state.set_next_tab();
+                match self.state.get_tab() {
+                    Tab::Home => {
+                        self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                            .await;
+                    }
+                    Tab::Notifications => {
+                        self.dispatch(IoEvent::LoadNotifications).await;
+                    }
+                    Tab::Search => {}
+                }
+                AppReturn::Continue
+            }
+            _ => AppReturn::Continue,
+        }
+    }
+
+    async fn search_input_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => {
+                self.state.set_mode(state::Mode::Normal);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
+            Key::Enter => {
+                let query = self.state.get_input().value().to_string();
+                if !query.is_empty() {
+                    self.dispatch(IoEvent::Search(query)).await;
+                    self.state.set_mode(state::Mode::Normal);
+                    self.state.set_tab(Tab::Search);
+                    self.state.set_input(Input::default());
+                }
+                AppReturn::Continue
+            }
+            Key::Left | Key::Ctrl('b') => {
+                self.state.move_input_cursor_prev();
+                AppReturn::Continue
+            }
+            Key::Right | Key::Ctrl('f') => {
+                self.state.move_input_cursor_next();
+                AppReturn::Continue
+            }
+            Key::Ctrl('a') => {
+                self.state.move_input_cursor_start();
+                AppReturn::Continue
+            }
+            Key::Ctrl('e') => {
+                self.state.move_input_cursor_end();
+                AppReturn::Continue
+            }
+            Key::Char(c) => {
+                self.state.insert_input(InputRequest::InsertChar(c));
+                AppReturn::Continue
+            }
+            Key::Backspace | Key::Ctrl('h') => {
+                self.state.remove_input_prev();
                 AppReturn::Continue
             }
             _ => AppReturn::Continue,

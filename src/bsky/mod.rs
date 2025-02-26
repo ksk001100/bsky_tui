@@ -3,7 +3,7 @@ use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid};
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
-        feed::{defs, get_timeline, post},
+        feed::{defs, get_timeline, post, search_posts},
         notification,
     },
     com::atproto::{repo, server},
@@ -47,6 +47,34 @@ pub async fn timeline(agent: &BskyAgent, cursor: Option<String>) -> Result<get_t
         .await?;
 
     Ok(timeline)
+}
+
+pub async fn search(agent: &BskyAgent, query: String) -> Result<search_posts::Output> {
+    let search_result = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .search_posts(
+            search_posts::ParametersData {
+                cursor: None,
+                limit: None,
+                q: query.clone(),
+                author: None,
+                domain: None,
+                lang: None,
+                mentions: None,
+                since: None,
+                sort: None,
+                tag: None,
+                until: None,
+                url: None,
+            }
+            .into(),
+        )
+        .await?;
+
+    Ok(search_result)
 }
 
 pub async fn send_post(
