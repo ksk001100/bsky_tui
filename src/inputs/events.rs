@@ -1,9 +1,12 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
-use super::key::Key;
-use super::InputEvent;
+use super::{key::Key, InputEvent};
 
 pub struct Events {
     rx: tokio::sync::mpsc::Receiver<InputEvent>,

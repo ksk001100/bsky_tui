@@ -1,11 +1,12 @@
-use std::fmt;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
-use atrium_api::app::bsky::feed::defs::PostViewData;
-use atrium_api::app::bsky::{
-    feed::defs::FeedViewPost, notification::list_notifications::Notification,
+use atrium_api::{
+    app::bsky::{
+        feed::defs::{FeedViewPost, PostViewData},
+        notification::list_notifications::Notification,
+    },
+    types::string::{Did, Handle},
 };
-use atrium_api::types::string::{Did, Handle};
 use bsky_sdk::BskyAgent;
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};

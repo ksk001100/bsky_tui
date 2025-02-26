@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use seahorse::{App as SeahorseApp, Command, Context};
 
-use bsky_tui::utils::get_splash;
 use bsky_tui::{
     app::{config::AppConfig, App},
     io::{handler::IoAsyncHandler, IoEvent},
     start_ui,
+    utils::get_splash,
 };
 
 fn main() {

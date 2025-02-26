@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use atrium_api::app::bsky::feed::post::ReplyRefData;
-use atrium_api::com::atproto::repo::strong_ref;
+use atrium_api::{app::bsky::feed::post::ReplyRefData, com::atproto::repo::strong_ref};
 use eyre::Result;
 use tui_input::Input;
 

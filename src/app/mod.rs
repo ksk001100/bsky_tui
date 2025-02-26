@@ -2,16 +2,16 @@ pub mod config;
 pub mod state;
 pub mod ui;
 
-use self::state::AppState;
-use crate::io::TimelineEvent;
-use crate::{
-    app::{config::AppConfig, state::Tab},
-    inputs::key::Key,
-    io::IoEvent,
-};
 use atrium_api::types::string::{Did, Handle};
 use bsky_sdk::BskyAgent;
 use tui_input::{Input, InputRequest};
+
+use self::state::AppState;
+use crate::{
+    app::{config::AppConfig, state::Tab},
+    inputs::key::Key,
+    io::{IoEvent, TimelineEvent},
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AppReturn {

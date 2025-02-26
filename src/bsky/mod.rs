@@ -1,5 +1,5 @@
-use atrium_api::record::KnownRecord;
-use atrium_api::types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid};
+use eyre::Result;
+
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
@@ -7,10 +7,12 @@ use atrium_api::{
         notification,
     },
     com::atproto::{repo, server},
+    record::KnownRecord,
+    types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid},
 };
 use atrium_xrpc_client::reqwest::ReqwestClient;
+
 use bsky_sdk::BskyAgent;
-use eyre::Result;
 
 pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
 
