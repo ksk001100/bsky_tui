@@ -9,11 +9,19 @@ pub enum IoEvent {
     Like,
     Repost,
     Reply,
-    Search(String),
+    Search(String, SearchEvent),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TimelineEvent {
+    Load,
+    Next,
+    Prev,
+    Reload,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum SearchEvent {
     Load,
     Next,
     Prev,

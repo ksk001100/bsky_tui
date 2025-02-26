@@ -4,7 +4,7 @@ use atrium_api::{app::bsky::feed::post::ReplyRefData, com::atproto::repo::strong
 use eyre::Result;
 use tui_input::Input;
 
-use super::{IoEvent, TimelineEvent};
+use super::{IoEvent, SearchEvent, TimelineEvent};
 use crate::{
     app::{config::AppConfig, state::Mode, state::Tab, App},
     bsky,
@@ -28,7 +28,7 @@ impl IoAsyncHandler {
             IoEvent::Like => self.do_like().await,
             IoEvent::Repost => self.do_repost().await,
             IoEvent::Reply => self.do_reply().await,
-            IoEvent::Search(query) => self.do_search(query).await,
+            IoEvent::Search(query, action) => self.do_search(query, action).await,
         };
 
         let mut app = self.app.lock().await;
@@ -175,7 +175,16 @@ impl IoAsyncHandler {
         Ok(())
     }
 
-    async fn do_search(&mut self, query: String) -> Result<()> {
+    async fn do_search(&mut self, query: String, event: SearchEvent) -> Result<()> {
+        let current_cursor_index = {
+            let app = self.app.lock().await;
+            app.state.get_search_current_cursor_index()
+        };
+
+        if current_cursor_index == 0 && event == SearchEvent::Prev {
+            return Ok(());
+        }
+
         {
             let mut app = self.app.lock().await;
             app.state.set_loading(true);
@@ -185,18 +194,85 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_agent().unwrap()
         };
-        let search_results = bsky::search(&agent, query).await?;
-        let mut app = self.app.lock().await;
-        app.state.set_search_results(Some(
-            search_results
-                .posts
-                .iter()
-                .map(|post| post.data.clone())
-                .collect(),
-        ));
-        app.state.set_tab(Tab::Search);
-        app.state.move_search_scroll_top();
-        app.state.set_loading(false);
+
+        let cursor = match event {
+            SearchEvent::Load => {
+                let mut app = self.app.lock().await;
+                app.state.set_search_query(Some(query.clone()));
+                None
+            }
+            SearchEvent::Next => {
+                let app = self.app.lock().await;
+                app.state.get_search_next_cursor()
+            }
+            SearchEvent::Prev => {
+                let app = self.app.lock().await;
+                app.state.get_search_prev_cursor()
+            }
+            SearchEvent::Reload => {
+                let app = self.app.lock().await;
+                app.state.get_search_current_cursor()
+            }
+        };
+
+        let current_cursor_index = {
+            let app = self.app.lock().await;
+            app.state.get_search_current_cursor_index()
+        };
+
+        if event == SearchEvent::Prev && current_cursor_index == 0 {
+            return Ok(());
+        }
+
+        let query_to_use = if event == SearchEvent::Load {
+            query
+        } else {
+            let app = self.app.lock().await;
+            app.state.get_search_query().unwrap_or_default()
+        };
+
+        {
+            let search_results = bsky::search(&agent, query_to_use, cursor).await?;
+            let mut app = self.app.lock().await;
+            app.state.set_search_results(Some(
+                search_results
+                    .posts
+                    .iter()
+                    .map(|post| post.data.clone())
+                    .collect(),
+            ));
+
+            match event {
+                SearchEvent::Load => {
+                    let mut cursors = app.state.get_search_cursors().clone();
+                    cursors.push(search_results.cursor.clone());
+                    app.state.set_search_cursors(cursors);
+                }
+                SearchEvent::Next => {
+                    let mut cursors = app.state.get_search_cursors().clone();
+                    cursors.push(search_results.cursor.clone());
+                    app.state.set_search_cursors(cursors);
+                    app.state
+                        .set_search_current_cursor_index(current_cursor_index + 1);
+                }
+                SearchEvent::Prev => {
+                    if current_cursor_index == 0 {
+                        return Ok(());
+                    }
+                    app.state
+                        .set_search_current_cursor_index(current_cursor_index - 1);
+                }
+                _ => (),
+            }
+
+            app.state.set_tab(Tab::Search);
+            app.state.move_search_scroll_top();
+        }
+
+        {
+            let mut app = self.app.lock().await;
+            app.state.set_loading(false);
+        }
 
         Ok(())
     }

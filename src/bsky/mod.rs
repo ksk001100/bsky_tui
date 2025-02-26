@@ -51,7 +51,11 @@ pub async fn timeline(agent: &BskyAgent, cursor: Option<String>) -> Result<get_t
     Ok(timeline)
 }
 
-pub async fn search(agent: &BskyAgent, query: String) -> Result<search_posts::Output> {
+pub async fn search(
+    agent: &BskyAgent,
+    query: String,
+    cursor: Option<String>,
+) -> Result<search_posts::Output> {
     let search_result = agent
         .api
         .app
@@ -59,7 +63,7 @@ pub async fn search(agent: &BskyAgent, query: String) -> Result<search_posts::Ou
         .feed
         .search_posts(
             search_posts::ParametersData {
-                cursor: None,
+                cursor,
                 limit: None,
                 q: query.clone(),
                 author: None,

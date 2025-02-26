@@ -394,7 +394,8 @@ pub fn search_results<'a>(state: &AppState) -> List<'a> {
                 .style(Style::default())
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
-                    "Search Results ({})",
+                    "Search Results ({}: {})",
+                    state.get_search_current_cursor_index() + 1,
                     state.get_search_results().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),

@@ -10,7 +10,7 @@ use self::state::AppState;
 use crate::{
     app::{config::AppConfig, state::Tab},
     inputs::key::Key,
-    io::{IoEvent, TimelineEvent},
+    io::{IoEvent, SearchEvent, TimelineEvent},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -218,6 +218,38 @@ impl App {
                 }
                 AppReturn::Continue
             }
+            Key::Char('h') | Key::Left => {
+                match self.state.get_search_query() {
+                    Some(query) => {
+                        self.dispatch(IoEvent::Search(query, SearchEvent::Prev))
+                            .await;
+                    }
+                    None => {
+                        self.dispatch(IoEvent::Search(
+                            self.state.get_input().value().to_string(),
+                            SearchEvent::Prev,
+                        ))
+                        .await;
+                    }
+                }
+                AppReturn::Continue
+            }
+            Key::Char('l') | Key::Right => {
+                match self.state.get_search_query() {
+                    Some(query) => {
+                        self.dispatch(IoEvent::Search(query, SearchEvent::Next))
+                            .await;
+                    }
+                    None => {
+                        self.dispatch(IoEvent::Search(
+                            self.state.get_input().value().to_string(),
+                            SearchEvent::Next,
+                        ))
+                        .await;
+                    }
+                }
+                AppReturn::Continue
+            }
             _ => AppReturn::Continue,
         }
     }
@@ -232,7 +264,8 @@ impl App {
             Key::Enter => {
                 let query = self.state.get_input().value().to_string();
                 if !query.is_empty() {
-                    self.dispatch(IoEvent::Search(query)).await;
+                    self.dispatch(IoEvent::Search(query, super::io::SearchEvent::Load))
+                        .await;
                     self.state.set_mode(state::Mode::Normal);
                     self.state.set_tab(Tab::Search);
                     self.state.set_input(Input::default());
