@@ -9,7 +9,7 @@ pub enum IoEvent {
     Like,
     Repost,
     Reply,
-    Search(String, SearchEvent),
+    Search(SearchEvent),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -22,7 +22,7 @@ pub enum TimelineEvent {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum SearchEvent {
-    Load,
+    Load(String),
     Next,
     Prev,
     Reload,

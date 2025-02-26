@@ -28,7 +28,7 @@ impl IoAsyncHandler {
             IoEvent::Like => self.do_like().await,
             IoEvent::Repost => self.do_repost().await,
             IoEvent::Reply => self.do_reply().await,
-            IoEvent::Search(query, action) => self.do_search(query, action).await,
+            IoEvent::Search(action) => self.do_search(action).await,
         };
 
         let mut app = self.app.lock().await;
@@ -175,13 +175,13 @@ impl IoAsyncHandler {
         Ok(())
     }
 
-    async fn do_search(&mut self, query: String, event: SearchEvent) -> Result<()> {
+    async fn do_search(&mut self, event: SearchEvent) -> Result<()> {
         let current_cursor_index = {
             let app = self.app.lock().await;
             app.state.get_search_current_cursor_index()
         };
 
-        if current_cursor_index == 0 && event == SearchEvent::Prev {
+        if current_cursor_index == 0 && matches!(event, SearchEvent::Prev) {
             return Ok(());
         }
 
@@ -195,8 +195,8 @@ impl IoAsyncHandler {
             app.state.get_agent().unwrap()
         };
 
-        let cursor = match event {
-            SearchEvent::Load => {
+        let cursor = match &event {
+            SearchEvent::Load(query) => {
                 let mut app = self.app.lock().await;
                 app.state.set_search_query(Some(query.clone()));
                 None
@@ -220,15 +220,16 @@ impl IoAsyncHandler {
             app.state.get_search_current_cursor_index()
         };
 
-        if event == SearchEvent::Prev && current_cursor_index == 0 {
+        if matches!(event, SearchEvent::Prev) && current_cursor_index == 0 {
             return Ok(());
         }
 
-        let query_to_use = if event == SearchEvent::Load {
-            query
-        } else {
-            let app = self.app.lock().await;
-            app.state.get_search_query().unwrap_or_default()
+        let query_to_use = match &event {
+            SearchEvent::Load(query) => query.clone(),
+            _ => {
+                let app = self.app.lock().await;
+                app.state.get_search_query().unwrap_or_default()
+            }
         };
 
         {
@@ -242,8 +243,8 @@ impl IoAsyncHandler {
                     .collect(),
             ));
 
-            match event {
-                SearchEvent::Load => {
+            match &event {
+                SearchEvent::Load(_) => {
                     let mut cursors = app.state.get_search_cursors().clone();
                     cursors.push(search_results.cursor.clone());
                     app.state.set_search_cursors(cursors);

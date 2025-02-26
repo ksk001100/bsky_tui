@@ -220,32 +220,26 @@ impl App {
             }
             Key::Char('h') | Key::Left => {
                 match self.state.get_search_query() {
-                    Some(query) => {
-                        self.dispatch(IoEvent::Search(query, SearchEvent::Prev))
-                            .await;
+                    Some(_) => {
+                        self.dispatch(IoEvent::Search(SearchEvent::Prev)).await;
                     }
                     None => {
-                        self.dispatch(IoEvent::Search(
-                            self.state.get_input().value().to_string(),
-                            SearchEvent::Prev,
-                        ))
-                        .await;
+                        let query = self.state.get_input().value().to_string();
+                        self.state.set_search_query(Some(query.clone()));
+                        self.dispatch(IoEvent::Search(SearchEvent::Prev)).await;
                     }
                 }
                 AppReturn::Continue
             }
             Key::Char('l') | Key::Right => {
                 match self.state.get_search_query() {
-                    Some(query) => {
-                        self.dispatch(IoEvent::Search(query, SearchEvent::Next))
-                            .await;
+                    Some(_) => {
+                        self.dispatch(IoEvent::Search(SearchEvent::Next)).await;
                     }
                     None => {
-                        self.dispatch(IoEvent::Search(
-                            self.state.get_input().value().to_string(),
-                            SearchEvent::Next,
-                        ))
-                        .await;
+                        let query = self.state.get_input().value().to_string();
+                        self.state.set_search_query(Some(query.clone()));
+                        self.dispatch(IoEvent::Search(SearchEvent::Next)).await;
                     }
                 }
                 AppReturn::Continue
@@ -264,7 +258,8 @@ impl App {
             Key::Enter => {
                 let query = self.state.get_input().value().to_string();
                 if !query.is_empty() {
-                    self.dispatch(IoEvent::Search(query, super::io::SearchEvent::Load))
+                    self.state.set_search_query(Some(query.clone()));
+                    self.dispatch(IoEvent::Search(SearchEvent::Load(query)))
                         .await;
                     self.state.set_mode(state::Mode::Normal);
                     self.state.set_tab(Tab::Search);
