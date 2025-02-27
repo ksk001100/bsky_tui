@@ -562,7 +562,6 @@ pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
 pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
 
-    // 検索タブからの返信の場合は検索結果の投稿を使用
     if state.get_tab() == Tab::Search {
         if let Some(search_result) = state.get_current_search_result() {
             let display_name = search_result
