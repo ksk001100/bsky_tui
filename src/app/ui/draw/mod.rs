@@ -612,7 +612,6 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         }
     }
 
-    // タイムラインタブからの返信の場合は通常のフィードを使用
     let current_feed = state.get_current_feed();
 
     if current_feed.is_none() {
