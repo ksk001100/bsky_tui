@@ -561,6 +561,57 @@ pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
 
 pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
+
+    if state.get_tab() == Tab::Search {
+        if let Some(search_result) = state.get_current_search_result() {
+            let display_name = search_result
+                .author
+                .display_name
+                .clone()
+                .unwrap_or_else(|| "".into());
+            let handle = search_result.author.handle.to_string();
+            let parent_text =
+                if let Ok(post) = post::Record::try_from_unknown(search_result.record.clone()) {
+                    post.text.clone()
+                } else {
+                    "".to_string()
+                };
+            let reply_count = search_result.reply_count.unwrap_or(0);
+            let repost_count = search_result.repost_count.unwrap_or(0);
+            let like_count = search_result.like_count.unwrap_or(0);
+
+            return Paragraph::new(vec![
+                Line::from(format!("{display_name} @{handle}")),
+                Line::from(parent_text),
+                Line::from(vec![
+                    Span::styled(
+                        format!("↩ {}", reply_count),
+                        Style::default().fg(Color::Gray),
+                    ),
+                    Span::styled(
+                        format!("   🔁 {}", repost_count),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::styled(
+                        format!("   ❤ {}", like_count),
+                        Style::default().fg(Color::Red),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(text),
+            ])
+            .style(Style::default().fg(Color::White).bg(Color::Black))
+            .alignment(Alignment::Left)
+            .block(
+                Block::default()
+                    .style(Style::default().fg(Color::White))
+                    .borders(Borders::ALL)
+                    .title("Reply")
+                    .padding(Padding::new(1, 1, 1, 1)),
+            );
+        }
+    }
+
     let current_feed = state.get_current_feed();
 
     if current_feed.is_none() {
