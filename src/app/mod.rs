@@ -64,12 +64,8 @@ impl App {
                 AppReturn::Continue
             }
             Key::Char('N') => {
-                if self.state.get_current_search_result().is_some() {
-                    self.state.set_mode(state::Mode::Reply);
-                    AppReturn::Continue
-                } else {
-                    AppReturn::Continue
-                }
+                self.state.set_mode(state::Mode::Reply);
+                AppReturn::Continue
             }
             Key::Ctrl('r') => {
                 self.dispatch(IoEvent::Repost).await;
@@ -185,6 +181,7 @@ impl App {
                 AppReturn::Continue
             }
             Key::Char('N') => {
+                self.state.set_tab(Tab::Search);
                 self.state.set_mode(state::Mode::Reply);
                 AppReturn::Continue
             }
@@ -362,14 +359,10 @@ impl App {
                 AppReturn::Continue
             }
             Key::Enter => {
-                match self.state.get_tab() {
-                    Tab::Home => {
-                        self.dispatch(IoEvent::Reply).await;
-                    }
-                    Tab::Search => {
-                        self.dispatch(IoEvent::SearchReply).await;
-                    }
-                    _ => {}
+                if let Some(_) = self.state.get_current_search_result() {
+                    self.dispatch(IoEvent::SearchReply).await;
+                } else {
+                    self.dispatch(IoEvent::Reply).await;
                 }
                 AppReturn::Continue
             }
