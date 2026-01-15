@@ -8,7 +8,7 @@ use atrium_api::{
     },
     com::atproto::{repo, server},
     record::KnownRecord,
-    types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid},
+    types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid, RecordKey},
 };
 use atrium_xrpc_client::reqwest::ReqwestClient;
 
@@ -140,8 +140,6 @@ pub async fn likes(agent: &BskyAgent, did: String) -> Result<repo::list_records:
                 cursor: None,
                 limit: None,
                 reverse: None,
-                rkey_end: None,
-                rkey_start: None,
             }
             .into(),
         )
@@ -163,8 +161,6 @@ pub async fn reposts(agent: &BskyAgent, did: String) -> Result<repo::list_record
                 cursor: None,
                 limit: None,
                 reverse: None,
-                rkey_end: None,
-                rkey_start: None,
             }
             .into(),
         )
@@ -195,6 +191,7 @@ pub async fn like(agent: &BskyAgent, _did: Did, cid: Cid, uri: String) -> Result
                     uri: uri.clone(),
                 }
                 .into(),
+                via: None,
             }
             .into(),
         )))
@@ -213,7 +210,7 @@ pub async fn unlike(agent: &Agent, did: Did, rkey: String) -> Result<()> {
             repo::delete_record::InputData {
                 collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
                 repo: AtIdentifier::Did(did),
-                rkey,
+                rkey: RecordKey::new(rkey).unwrap(),
                 swap_commit: None,
                 swap_record: None,
             }
@@ -234,6 +231,7 @@ pub async fn repost(agent: &BskyAgent, _did: Did, cid: Cid, uri: String) -> Resu
                     uri: uri.clone(),
                 }
                 .into(),
+                via: None,
             }
             .into(),
         )))
@@ -252,7 +250,7 @@ pub async fn unrepost(agent: &BskyAgent, did: Did, rkey: String) -> Result<()> {
             repo::delete_record::InputData {
                 collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
                 repo: AtIdentifier::Did(did),
-                rkey,
+                rkey: RecordKey::new(rkey).unwrap(),
                 swap_commit: None,
                 swap_record: None,
             }

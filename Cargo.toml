@@ -1,6 +1,6 @@
 [package]
 name = "bsky_tui"
-version = "0.0.9"
+version = "0.0.10"
 edition = "2018"
 authors = ["Keisuke Toyota <hm.pudding0715@gmail.com>"]
 repository = "https://github.com/ksk001100/bsky_tui"
@@ -15,7 +15,7 @@ eyre = "0.6"
 seahorse = "2.2"
 tokio = { version = "1", features = ["full"] }
 ratatui = { version = "0.29", features = ["all-widgets"] }
-atrium-api = "0.25"
+atrium-api = "0.25.7"
 atrium-xrpc = "0.12"
 atrium-xrpc-client = "0.5"
 bsky-sdk = "0.1.16"
