@@ -98,8 +98,14 @@ impl IoAsyncHandler {
 
         {
             let timeline = bsky::timeline(&agent, cursor).await?;
+            let image_urls = timeline
+                .feed
+                .iter()
+                .flat_map(|feed| bsky::post_image_urls(&feed.post))
+                .collect::<Vec<_>>();
             let mut app = self.app.lock().await;
             app.state.set_timeline(Some(timeline.feed.clone()));
+            app.queue_images(image_urls);
 
             match event {
                 TimelineEvent::Load => {
@@ -237,6 +243,11 @@ impl IoAsyncHandler {
 
         {
             let search_results = bsky::search(&agent, query_to_use, cursor).await?;
+            let image_urls = search_results
+                .posts
+                .iter()
+                .flat_map(|post| bsky::post_image_urls(post))
+                .collect::<Vec<_>>();
             let mut app = self.app.lock().await;
             app.state.set_search_results(Some(
                 search_results
@@ -245,6 +256,7 @@ impl IoAsyncHandler {
                     .map(|post| post.data.clone())
                     .collect(),
             ));
+            app.queue_images(image_urls);
 
             match &event {
                 SearchEvent::Load(_) => {

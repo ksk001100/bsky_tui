@@ -10,6 +10,7 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 ## Features
 
 - View and browse home timeline
+- Display profile pictures and post image attachments in supported terminals
 - View and browse notifications
 - Search for posts
 - Create new posts
@@ -67,6 +68,10 @@ bsky_tui config
 # Launch the application
 bsky_tui
 ```
+
+Image rendering uses the best protocol detected for the current terminal. Kitty-compatible
+terminals use the Kitty graphics protocol; unsupported terminals fall back to a compatible
+text-cell rendering mode.
 
 ## Keybindings
 

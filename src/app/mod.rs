@@ -1,4 +1,5 @@
 pub mod config;
+pub mod images;
 pub mod state;
 pub mod ui;
 
@@ -6,6 +7,7 @@ use atrium_api::types::string::{Did, Handle};
 use bsky_sdk::BskyAgent;
 use tui_input::{Input, InputRequest};
 
+use self::images::ImageCache;
 use self::state::AppState;
 use crate::{
     app::{config::AppConfig, state::Tab},
@@ -23,6 +25,7 @@ pub struct App {
     io_tx: tokio::sync::mpsc::Sender<IoEvent>,
     is_loading: bool,
     pub state: AppState,
+    images: ImageCache,
 }
 
 impl App {
@@ -34,6 +37,7 @@ impl App {
             io_tx,
             is_loading,
             state,
+            images: ImageCache::new(),
         }
     }
 
@@ -94,7 +98,7 @@ impl App {
             }
             Key::Enter => {
                 if let Some(feed) = self.state.get_current_feed() {
-                    if let Some(id) = feed.post.uri.split('/').last() {
+                    if let Some(id) = feed.post.uri.split('/').next_back() {
                         let handle = &feed.post.author.handle;
                         let url =
                             format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
@@ -212,7 +216,7 @@ impl App {
             }
             Key::Enter => {
                 if let Some(feed) = self.state.get_current_search_result() {
-                    if let Some(id) = feed.uri.split('/').last() {
+                    if let Some(id) = feed.uri.split('/').next_back() {
                         let handle = &feed.author.handle;
                         let url =
                             format!("https://bsky.app/profile/{}/post/{}", handle.as_str(), id);
@@ -359,7 +363,7 @@ impl App {
                 AppReturn::Continue
             }
             Key::Enter => {
-                if let Some(_) = self.state.get_current_search_result() {
+                if self.state.get_current_search_result().is_some() {
                     self.dispatch(IoEvent::SearchReply).await;
                 } else {
                     self.dispatch(IoEvent::Reply).await;
@@ -405,7 +409,26 @@ impl App {
     }
 
     pub async fn update_on_tick(&mut self) -> AppReturn {
+        self.images.poll();
         AppReturn::Continue
+    }
+
+    pub fn configure_images(&mut self, picker: ratatui_image::picker::Picker) {
+        self.images.configure(picker);
+    }
+
+    pub fn queue_images<I>(&mut self, urls: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.images.queue(urls);
+    }
+
+    pub fn image_mut(
+        &mut self,
+        url: &str,
+    ) -> Option<&mut ratatui_image::protocol::StatefulProtocol> {
+        self.images.get_mut(url)
     }
 
     pub async fn dispatch(&mut self, action: IoEvent) {

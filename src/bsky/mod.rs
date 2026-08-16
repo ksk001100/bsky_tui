@@ -3,12 +3,16 @@ use eyre::Result;
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
+        embed::record_with_media::ViewMediaRefs,
         feed::{defs, get_timeline, post, search_posts},
         notification,
     },
     com::atproto::{repo, server},
     record::KnownRecord,
-    types::string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid, RecordKey},
+    types::{
+        string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid, RecordKey},
+        Union,
+    },
 };
 use atrium_xrpc_client::reqwest::ReqwestClient;
 
@@ -81,6 +85,38 @@ pub async fn search(
         .await?;
 
     Ok(search_result)
+}
+
+pub fn post_image_urls(post: &defs::PostViewData) -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Some(avatar) = &post.author.avatar {
+        urls.push(avatar.clone());
+    }
+    urls.extend(post_attachment_urls(post));
+    urls
+}
+
+pub fn post_attachment_urls(post: &defs::PostViewData) -> Vec<String> {
+    let Some(Union::Refs(embed)) = &post.embed else {
+        return Vec::new();
+    };
+
+    match embed {
+        defs::PostViewEmbedRefs::AppBskyEmbedImagesView(images) => images
+            .images
+            .iter()
+            .map(|image| image.thumb.clone())
+            .collect(),
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(record) => match &record.media {
+            Union::Refs(ViewMediaRefs::AppBskyEmbedImagesView(images)) => images
+                .images
+                .iter()
+                .map(|image| image.thumb.clone())
+                .collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
 }
 
 pub async fn send_post(
@@ -274,7 +310,7 @@ pub async fn toggle_repost(agent: &BskyAgent, did: Did, feed: defs::FeedViewPost
 }
 
 pub fn get_url(handle: Handle, uri: String) -> Option<String> {
-    if let Some(id) = uri.split('/').last() {
+    if let Some(id) = uri.split('/').next_back() {
         let handle = handle.to_string();
         Some(format!("https://bsky.app/profile/{handle}/post/{id}"))
     } else {
@@ -283,7 +319,7 @@ pub fn get_url(handle: Handle, uri: String) -> Option<String> {
 }
 
 pub fn uri_to_rkey(uri: String) -> Option<String> {
-    uri.split('/').last().map(|s| s.to_string())
+    uri.split('/').next_back().map(|s| s.to_string())
 }
 
 pub async fn toggle_like_post_view(

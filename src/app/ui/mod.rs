@@ -2,10 +2,11 @@ mod draw;
 mod layout;
 
 use ratatui::{backend::Backend, layout::Position, widgets::Clear, Frame};
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::{state::Tab, App};
 
-pub fn render<B>(f: &mut Frame, app: &App)
+pub fn render<B>(f: &mut Frame, app: &mut App)
 where
     B: Backend,
 {
@@ -32,11 +33,11 @@ where
     } else {
         match app.state.get_tab() {
             Tab::Home => {
-                let body = draw::timeline(app.state());
-                app.state
-                    .get_tl_list_state()
-                    .select(Some(app.state.get_tl_list_position()));
-                f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
+                let posts = draw::timeline(app.state(), body_chunks[1].width);
+                let mut list_state = app.state.get_tl_list_state();
+                list_state.select(Some(app.state.get_tl_list_position()));
+                f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
+                render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
             }
             Tab::Notifications => {
                 let body = draw::notifications(app.state());
@@ -50,15 +51,11 @@ where
                 );
             }
             Tab::Search => {
-                let body = draw::search_results(app.state());
-                app.state
-                    .get_search_list_state()
-                    .select(Some(app.state.get_search_list_position()));
-                f.render_stateful_widget(
-                    body,
-                    body_chunks[1],
-                    &mut app.state.get_search_list_state(),
-                );
+                let posts = draw::search_results(app.state(), body_chunks[1].width);
+                let mut list_state = app.state.get_search_list_state();
+                list_state.select(Some(app.state.get_search_list_position()));
+                f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
+                render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
             }
         };
     }
@@ -101,6 +98,24 @@ where
             area.x + 2 + app.state.get_input().visual_cursor() as u16,
             area.y + 2,
         ));
+    }
+}
+
+fn render_post_images(
+    f: &mut Frame,
+    app: &mut App,
+    layouts: &[draw::PostLayout],
+    area: ratatui::layout::Rect,
+    offset: usize,
+) {
+    for placement in draw::image_placements(layouts, area, offset) {
+        if let Some(protocol) = app.image_mut(&placement.url) {
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                placement.area,
+                protocol,
+            );
+        }
     }
 }
 
