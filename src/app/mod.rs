@@ -11,6 +11,7 @@ use self::images::ImageCache;
 use self::state::AppState;
 use crate::{
     app::{config::AppConfig, state::Tab},
+    bsky,
     inputs::key::Key,
     io::{IoEvent, SearchEvent, TimelineEvent},
 };
@@ -21,11 +22,35 @@ pub enum AppReturn {
     Continue,
 }
 
+struct ImageViewer {
+    urls: Vec<String>,
+    index: usize,
+}
+
+impl ImageViewer {
+    fn new(urls: Vec<String>) -> Option<Self> {
+        (!urls.is_empty()).then_some(Self { urls, index: 0 })
+    }
+
+    fn previous(&mut self) {
+        self.index = if self.index == 0 {
+            self.urls.len() - 1
+        } else {
+            self.index - 1
+        };
+    }
+
+    fn next(&mut self) {
+        self.index = (self.index + 1) % self.urls.len();
+    }
+}
+
 pub struct App {
     io_tx: tokio::sync::mpsc::Sender<IoEvent>,
     is_loading: bool,
     pub state: AppState,
     images: ImageCache,
+    image_viewer: Option<ImageViewer>,
 }
 
 impl App {
@@ -38,10 +63,15 @@ impl App {
             is_loading,
             state,
             images: ImageCache::new(),
+            image_viewer: None,
         }
     }
 
     pub async fn do_action(&mut self, key: Key) -> AppReturn {
+        if self.image_viewer.is_some() {
+            return self.image_viewer_action(key);
+        }
+
         match self.state.get_mode() {
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => self.timeline_action(key).await,
@@ -96,7 +126,7 @@ impl App {
                 self.state.move_tl_scroll_up();
                 AppReturn::Continue
             }
-            Key::Enter => {
+            Key::Char('b') => {
                 if let Some(feed) = self.state.get_current_feed() {
                     if let Some(id) = feed.post.uri.split('/').next_back() {
                         let handle = &feed.post.author.handle;
@@ -105,6 +135,15 @@ impl App {
                         let _ = webbrowser::open(&url).is_ok();
                     }
                 }
+                AppReturn::Continue
+            }
+            Key::Enter => {
+                let urls = self
+                    .state
+                    .get_current_feed()
+                    .map(|feed| bsky::post_attachment_fullsize_urls(&feed.post))
+                    .unwrap_or_default();
+                self.open_image_viewer(urls);
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -214,7 +253,7 @@ impl App {
                 self.state.move_search_scroll_up();
                 AppReturn::Continue
             }
-            Key::Enter => {
+            Key::Char('b') => {
                 if let Some(feed) = self.state.get_current_search_result() {
                     if let Some(id) = feed.uri.split('/').next_back() {
                         let handle = &feed.author.handle;
@@ -223,6 +262,15 @@ impl App {
                         let _ = webbrowser::open(&url).is_ok();
                     }
                 }
+                AppReturn::Continue
+            }
+            Key::Enter => {
+                let urls = self
+                    .state
+                    .get_current_search_result()
+                    .map(|post| bsky::post_attachment_fullsize_urls(&post))
+                    .unwrap_or_default();
+                self.open_image_viewer(urls);
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -408,6 +456,38 @@ impl App {
         }
     }
 
+    fn image_viewer_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc => self.image_viewer = None,
+            Key::Char('h') | Key::Left => {
+                if let Some(viewer) = &mut self.image_viewer {
+                    viewer.previous();
+                }
+            }
+            Key::Char('l') | Key::Right => {
+                if let Some(viewer) = &mut self.image_viewer {
+                    viewer.next();
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    fn open_image_viewer(&mut self, urls: Vec<String>) {
+        self.queue_images(urls.clone());
+        self.image_viewer = ImageViewer::new(urls);
+    }
+
+    pub fn current_image_viewer(&self) -> Option<(String, usize, usize)> {
+        let viewer = self.image_viewer.as_ref()?;
+        Some((
+            viewer.urls[viewer.index].clone(),
+            viewer.index + 1,
+            viewer.urls.len(),
+        ))
+    }
+
     pub async fn update_on_tick(&mut self) -> AppReturn {
         self.images.poll();
         AppReturn::Continue
@@ -431,6 +511,14 @@ impl App {
         self.images.get_mut(url)
     }
 
+    pub fn centered_image_area(
+        &self,
+        url: &str,
+        bounds: ratatui::layout::Rect,
+    ) -> Option<ratatui::layout::Rect> {
+        self.images.centered_area(url, bounds)
+    }
+
     pub async fn dispatch(&mut self, action: IoEvent) {
         self.is_loading = true;
         if self.io_tx.send(action).await.is_err() {
@@ -452,5 +540,28 @@ impl App {
 
     pub fn loaded(&mut self) {
         self.is_loading = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_viewer_navigation_wraps_in_both_directions() {
+        let mut viewer = ImageViewer::new(vec!["one".into(), "two".into(), "three".into()])
+            .expect("viewer should open");
+
+        viewer.previous();
+        assert_eq!(viewer.index, 2);
+        viewer.next();
+        assert_eq!(viewer.index, 0);
+        viewer.next();
+        assert_eq!(viewer.index, 1);
+    }
+
+    #[test]
+    fn image_viewer_does_not_open_without_attachments() {
+        assert!(ImageViewer::new(Vec::new()).is_none());
     }
 }

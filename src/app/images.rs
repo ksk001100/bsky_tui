@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 
+use ratatui::layout::Rect;
 use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
 use tokio::sync::mpsc;
 
@@ -8,7 +9,10 @@ const MAX_CACHED_IMAGES: usize = 512;
 
 enum ImageEntry {
     Loading,
-    Ready(StatefulProtocol),
+    Ready {
+        protocol: Box<StatefulProtocol>,
+        pixel_dimensions: (u32, u32),
+    },
     Failed,
 }
 
@@ -69,7 +73,7 @@ impl ImageCache {
 
     pub fn poll(&mut self) {
         for entry in self.entries.values_mut() {
-            if let ImageEntry::Ready(protocol) = entry {
+            if let ImageEntry::Ready { protocol, .. } = entry {
                 let _ = protocol.last_encoding_result();
             }
         }
@@ -79,11 +83,12 @@ impl ImageCache {
                 .bytes
                 .and_then(|bytes| image::load_from_memory(&bytes).ok())
                 .and_then(|image| {
-                    self.picker
-                        .as_ref()
-                        .map(|picker| picker.new_resize_protocol(image))
+                    let pixel_dimensions = (image.width(), image.height());
+                    self.picker.as_ref().map(|picker| ImageEntry::Ready {
+                        protocol: Box::new(picker.new_resize_protocol(image)),
+                        pixel_dimensions,
+                    })
                 })
-                .map(ImageEntry::Ready)
                 .unwrap_or(ImageEntry::Failed);
             self.entries.insert(downloaded.url, entry);
         }
@@ -91,9 +96,20 @@ impl ImageCache {
 
     pub fn get_mut(&mut self, url: &str) -> Option<&mut StatefulProtocol> {
         match self.entries.get_mut(url) {
-            Some(ImageEntry::Ready(protocol)) => Some(protocol),
+            Some(ImageEntry::Ready { protocol, .. }) => Some(protocol.as_mut()),
             _ => None,
         }
+    }
+
+    pub fn centered_area(&self, url: &str, bounds: Rect) -> Option<Rect> {
+        let font_size = self.picker.as_ref()?.font_size();
+        let ImageEntry::Ready {
+            pixel_dimensions, ..
+        } = self.entries.get(url)?
+        else {
+            return None;
+        };
+        Some(centered_image_area(bounds, *pixel_dimensions, font_size))
     }
 
     fn make_room(&mut self) -> bool {
@@ -114,6 +130,31 @@ impl ImageCache {
         }
         false
     }
+}
+
+fn centered_image_area(bounds: Rect, pixel_dimensions: (u32, u32), font_size: (u16, u16)) -> Rect {
+    if bounds.width == 0 || bounds.height == 0 || pixel_dimensions.0 == 0 || pixel_dimensions.1 == 0
+    {
+        return Rect::new(bounds.x, bounds.y, 0, 0);
+    }
+
+    let available_width = bounds.width as f64 * font_size.0.max(1) as f64;
+    let available_height = bounds.height as f64 * font_size.1.max(1) as f64;
+    let scale = (available_width / pixel_dimensions.0 as f64)
+        .min(available_height / pixel_dimensions.1 as f64);
+    let width = ((pixel_dimensions.0 as f64 * scale) / font_size.0.max(1) as f64)
+        .ceil()
+        .clamp(1.0, bounds.width as f64) as u16;
+    let height = ((pixel_dimensions.1 as f64 * scale) / font_size.1.max(1) as f64)
+        .ceil()
+        .clamp(1.0, bounds.height as f64) as u16;
+
+    Rect::new(
+        bounds.x + bounds.width.saturating_sub(width) / 2,
+        bounds.y + bounds.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
 }
 
 impl Default for ImageCache {
@@ -162,5 +203,15 @@ mod tests {
         assert!(cache.make_room());
         assert_eq!(cache.entries.len(), MAX_CACHED_IMAGES - 1);
         assert!(!cache.entries.contains_key("image-0"));
+    }
+
+    #[test]
+    fn image_area_is_centered_using_pixel_and_cell_aspect_ratios() {
+        let bounds = Rect::new(5, 3, 80, 30);
+        let area = centered_image_area(bounds, (1000, 500), (10, 20));
+        assert_eq!(area, Rect::new(5, 8, 80, 20));
+
+        let portrait = centered_image_area(bounds, (500, 1000), (10, 20));
+        assert_eq!(portrait, Rect::new(30, 3, 30, 30));
     }
 }

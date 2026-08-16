@@ -147,7 +147,25 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from(""),
             Cell::from("Home/Search"),
             Cell::from("Enter"),
+            Cell::from("Open selected post images"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Search"),
+            Cell::from("b"),
             Cell::from("Selected post open in browser"),
+        ]),
+        Row::new(vec![
+            Cell::from("Image Viewer"),
+            Cell::from(""),
+            Cell::from("h/l, Left/Right"),
+            Cell::from("Show previous/next image"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from("q, Esc"),
+            Cell::from("Close image viewer"),
         ]),
         Row::new(vec![
             Cell::from(""),

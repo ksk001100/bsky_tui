@@ -97,25 +97,33 @@ pub fn post_image_urls(post: &defs::PostViewData) -> Vec<String> {
 }
 
 pub fn post_attachment_urls(post: &defs::PostViewData) -> Vec<String> {
+    post_attachments(post)
+        .iter()
+        .map(|image| image.thumb.clone())
+        .collect()
+}
+
+pub fn post_attachment_fullsize_urls(post: &defs::PostViewData) -> Vec<String> {
+    post_attachments(post)
+        .iter()
+        .map(|image| image.fullsize.clone())
+        .collect()
+}
+
+fn post_attachments(
+    post: &defs::PostViewData,
+) -> &[atrium_api::app::bsky::embed::images::ViewImage] {
     let Some(Union::Refs(embed)) = &post.embed else {
-        return Vec::new();
+        return &[];
     };
 
     match embed {
-        defs::PostViewEmbedRefs::AppBskyEmbedImagesView(images) => images
-            .images
-            .iter()
-            .map(|image| image.thumb.clone())
-            .collect(),
+        defs::PostViewEmbedRefs::AppBskyEmbedImagesView(images) => &images.images,
         defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(record) => match &record.media {
-            Union::Refs(ViewMediaRefs::AppBskyEmbedImagesView(images)) => images
-                .images
-                .iter()
-                .map(|image| image.thumb.clone())
-                .collect(),
-            _ => Vec::new(),
+            Union::Refs(ViewMediaRefs::AppBskyEmbedImagesView(images)) => &images.images,
+            _ => &[],
         },
-        _ => Vec::new(),
+        _ => &[],
     }
 }
 

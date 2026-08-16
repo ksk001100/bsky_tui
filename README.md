@@ -90,7 +90,8 @@ text-cell rendering mode.
 - `N`: Reply to selected post
 - `Ctrl+l`: Like/unlike
 - `Ctrl+r`: Repost/unrepost
-- `Enter`: Open selected post in browser
+- `Enter`: Open attached images
+- `b`: Open selected post in browser
 - `/`: Switch to search mode
 
 ### Notifications Tab
@@ -108,8 +109,14 @@ text-cell rendering mode.
 - `N`: Reply to selected post
 - `Ctrl+l`: Like/unlike
 - `Ctrl+r`: Repost/unrepost
-- `Enter`: Open selected post in browser
+- `Enter`: Open attached images
+- `b`: Open selected post in browser
 - `/`: Switch to search mode
+
+### Image Viewer
+- `h`, `Left`: Previous image
+- `l`, `Right`: Next image
+- `q`, `Esc`: Close image viewer
 
 ### Post/Reply Mode
 - `Esc`: Cancel

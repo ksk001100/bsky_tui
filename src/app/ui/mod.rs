@@ -1,7 +1,12 @@
 mod draw;
 mod layout;
 
-use ratatui::{backend::Backend, layout::Position, widgets::Clear, Frame};
+use ratatui::{
+    backend::Backend,
+    layout::{Alignment, Position},
+    widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
+};
 use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::{state::Tab, App};
@@ -99,6 +104,10 @@ where
             area.y + 2,
         ));
     }
+
+    if let Some((url, index, total)) = app.current_image_viewer() {
+        render_image_viewer(f, app, &url, index, total, size);
+    }
 }
 
 fn render_post_images(
@@ -116,6 +125,37 @@ fn render_post_images(
                 protocol,
             );
         }
+    }
+}
+
+fn render_image_viewer(
+    f: &mut Frame,
+    app: &mut App,
+    url: &str,
+    index: usize,
+    total: usize,
+    screen: ratatui::layout::Rect,
+) {
+    let area = layout::popup(90, 90, screen);
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Image {index}/{total}  h/← previous  l/→ next  q/Esc close "
+    ));
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    let image_area = app.centered_image_area(url, inner);
+    if let (Some(image_area), Some(protocol)) = (image_area, app.image_mut(url)) {
+        f.render_stateful_widget(
+            StatefulImage::default().resize(Resize::Fit(None)),
+            image_area,
+            protocol,
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new("Loading image...").alignment(Alignment::Center),
+            inner,
+        );
     }
 }
 
