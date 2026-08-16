@@ -54,8 +54,9 @@ impl fmt::Display for Tab {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum AppState {
+    #[default]
     Init,
     Initialized {
         agent: Arc<BskyAgent>,
@@ -717,11 +718,5 @@ impl AppState {
         if let Self::Initialized { search_query, .. } = self {
             *search_query = query;
         }
-    }
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self::Init
     }
 }

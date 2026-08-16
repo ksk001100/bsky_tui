@@ -6,8 +6,13 @@ pub mod utils;
 
 use std::{io::stdout, sync::Arc, time::Duration};
 
+use crossterm::{
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
+};
 use eyre::Result;
 use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui_image::picker::Picker;
 
 use crate::{
     app::{ui, App, AppReturn},
@@ -20,14 +25,33 @@ pub async fn start_ui(
     skip_splash: bool,
     splash: String,
 ) -> Result<()> {
-    let stdout = stdout();
+    let mut stdout = stdout();
     crossterm::terminal::enable_raw_mode()?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
     terminal.hide_cursor()?;
-    // terminal.show_cursor()?;
 
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((10, 20)));
+    app.lock().await.configure_images(picker);
+
+    let result = run_ui(&mut terminal, app, skip_splash, splash).await;
+
+    let _ = terminal.clear();
+    let _ = terminal.show_cursor();
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = crossterm::terminal::disable_raw_mode();
+
+    result
+}
+
+async fn run_ui(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    app: &Arc<tokio::sync::Mutex<App>>,
+    skip_splash: bool,
+    splash: String,
+) -> Result<()> {
     let tick_rate = Duration::from_millis(200);
     let mut events = Events::new(tick_rate);
 
@@ -61,7 +85,7 @@ pub async fn start_ui(
     loop {
         let mut app = app.lock().await;
 
-        terminal.draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, &app))?;
+        terminal.draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, &mut app))?;
 
         let result = match events.next().await {
             InputEvent::Input(key) => app.do_action(key).await,
@@ -73,10 +97,6 @@ pub async fn start_ui(
             break;
         }
     }
-
-    terminal.clear()?;
-    terminal.show_cursor()?;
-    crossterm::terminal::disable_raw_mode()?;
 
     Ok(())
 }

@@ -1,11 +1,17 @@
 mod draw;
 mod layout;
 
-use ratatui::{backend::Backend, layout::Position, widgets::Clear, Frame};
+use ratatui::{
+    backend::Backend,
+    layout::{Alignment, Position},
+    widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
+};
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::app::{state::Tab, App};
 
-pub fn render<B>(f: &mut Frame, app: &App)
+pub fn render<B>(f: &mut Frame, app: &mut App)
 where
     B: Backend,
 {
@@ -32,11 +38,11 @@ where
     } else {
         match app.state.get_tab() {
             Tab::Home => {
-                let body = draw::timeline(app.state());
-                app.state
-                    .get_tl_list_state()
-                    .select(Some(app.state.get_tl_list_position()));
-                f.render_stateful_widget(body, body_chunks[1], &mut app.state.get_tl_list_state());
+                let posts = draw::timeline(app.state(), body_chunks[1].width);
+                let mut list_state = app.state.get_tl_list_state();
+                list_state.select(Some(app.state.get_tl_list_position()));
+                f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
+                render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
             }
             Tab::Notifications => {
                 let body = draw::notifications(app.state());
@@ -50,15 +56,11 @@ where
                 );
             }
             Tab::Search => {
-                let body = draw::search_results(app.state());
-                app.state
-                    .get_search_list_state()
-                    .select(Some(app.state.get_search_list_position()));
-                f.render_stateful_widget(
-                    body,
-                    body_chunks[1],
-                    &mut app.state.get_search_list_state(),
-                );
+                let posts = draw::search_results(app.state(), body_chunks[1].width);
+                let mut list_state = app.state.get_search_list_state();
+                list_state.select(Some(app.state.get_search_list_position()));
+                f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
+                render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
             }
         };
     }
@@ -101,6 +103,59 @@ where
             area.x + 2 + app.state.get_input().visual_cursor() as u16,
             area.y + 2,
         ));
+    }
+
+    if let Some((url, index, total)) = app.current_image_viewer() {
+        render_image_viewer(f, app, &url, index, total, size);
+    }
+}
+
+fn render_post_images(
+    f: &mut Frame,
+    app: &mut App,
+    layouts: &[draw::PostLayout],
+    area: ratatui::layout::Rect,
+    offset: usize,
+) {
+    for placement in draw::image_placements(layouts, area, offset) {
+        if let Some(protocol) = app.image_mut(&placement.url) {
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                placement.area,
+                protocol,
+            );
+        }
+    }
+}
+
+fn render_image_viewer(
+    f: &mut Frame,
+    app: &mut App,
+    url: &str,
+    index: usize,
+    total: usize,
+    screen: ratatui::layout::Rect,
+) {
+    let area = layout::popup(90, 90, screen);
+    let block = Block::default().borders(Borders::ALL).title(format!(
+        " Image {index}/{total}  h/← previous  l/→ next  q/Esc close "
+    ));
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    let image_area = app.centered_image_area(url, inner);
+    if let (Some(image_area), Some(protocol)) = (image_area, app.image_mut(url)) {
+        f.render_stateful_widget(
+            StatefulImage::default().resize(Resize::Fit(None)),
+            image_area,
+            protocol,
+        );
+    } else {
+        f.render_widget(
+            Paragraph::new("Loading image...").alignment(Alignment::Center),
+            inner,
+        );
     }
 }
 

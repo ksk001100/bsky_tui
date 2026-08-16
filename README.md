@@ -10,6 +10,7 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 ## Features
 
 - View and browse home timeline
+- Display profile pictures and post image attachments in supported terminals
 - View and browse notifications
 - Search for posts
 - Create new posts
@@ -68,6 +69,10 @@ bsky_tui config
 bsky_tui
 ```
 
+Image rendering uses the best protocol detected for the current terminal. Kitty-compatible
+terminals use the Kitty graphics protocol; unsupported terminals fall back to a compatible
+text-cell rendering mode.
+
 ## Keybindings
 
 ### Common
@@ -85,7 +90,8 @@ bsky_tui
 - `N`: Reply to selected post
 - `Ctrl+l`: Like/unlike
 - `Ctrl+r`: Repost/unrepost
-- `Enter`: Open selected post in browser
+- `Enter`: Open attached images
+- `b`: Open selected post in browser
 - `/`: Switch to search mode
 
 ### Notifications Tab
@@ -103,8 +109,14 @@ bsky_tui
 - `N`: Reply to selected post
 - `Ctrl+l`: Like/unlike
 - `Ctrl+r`: Repost/unrepost
-- `Enter`: Open selected post in browser
+- `Enter`: Open attached images
+- `b`: Open selected post in browser
 - `/`: Switch to search mode
+
+### Image Viewer
+- `h`, `Left`: Previous image
+- `l`, `Right`: Next image
+- `q`, `Esc`: Close image viewer
 
 ### Post/Reply Mode
 - `Esc`: Cancel
