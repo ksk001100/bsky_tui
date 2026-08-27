@@ -122,246 +122,125 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
     )
 }
 
+const HELP_ROWS: &[(&str, &str, &str, &str)] = &[
+    (
+        "Normal Mode",
+        "Home/Notifications/Search",
+        "Tab",
+        "Change tab",
+    ),
+    ("", "Home/Notifications/Search", "q, Ctrl+c, Esc", "Quit"),
+    ("", "Home/Notifications/Search", "r", "Reload list"),
+    ("", "Home/Notifications/Search", "u", "Search users"),
+    ("", "Home/Notifications/Search", "?", "Show help popup"),
+    ("", "Home/Notifications/Search", "/", "Search mode"),
+    ("", "Home/Notifications", "n", "New post popup"),
+    ("", "Home/Notifications", "N", "Reply selected post popup"),
+    (
+        "",
+        "Home/Notifications/Search",
+        "j, Ctrl+n, Down",
+        "Select next post",
+    ),
+    (
+        "",
+        "Home/Notifications/Search",
+        "k, Ctrl+p, Up",
+        "Select previous post",
+    ),
+    ("", "Home/Search", "l, Right", "Next page"),
+    ("", "Home/Search", "h, Left", "Prev page"),
+    ("", "Home/Search", "Enter", "Open selected post images"),
+    ("", "Home/Search", "b", "Selected post open in browser"),
+    ("", "Home/Search", "t", "Open selected post thread"),
+    ("", "Home/Search/Thread", "e", "Open link or video embed"),
+    (
+        "",
+        "Home/Search/Thread",
+        "f",
+        "Select URL, mention, or hashtag",
+    ),
+    (
+        "",
+        "Home/Search/Thread",
+        "L / R / Q",
+        "Show Likes / Reposts / Quotes",
+    ),
+    (
+        "",
+        "Notifications",
+        "Enter, b",
+        "Open notification post in browser",
+    ),
+    (
+        "Image Viewer",
+        "",
+        "h/l, Left/Right",
+        "Show previous/next image",
+    ),
+    ("", "", "q, Esc", "Close image viewer"),
+    (
+        "Thread",
+        "",
+        "j/k, Up/Down",
+        "Move through ancestors and replies",
+    ),
+    ("", "", "b / q, Esc", "Open in browser / close thread"),
+    (
+        "",
+        "Home/Search",
+        "Ctrl+r",
+        "Repost selected post (unrepost if already reposted)",
+    ),
+    (
+        "",
+        "Home/Search",
+        "Ctrl+l",
+        "Like selected post (unlike if already liked)",
+    ),
+    ("Post/Reply/Search", "", "Esc", "Return to normal mode"),
+    ("", "", "Ctrl+s / Enter", "Send post/reply / insert newline"),
+    ("", "", "Left, Ctrl+b", "Move cursor left"),
+    ("", "", "Right, Ctrl+f", "Move cursor right"),
+    ("", "", "Ctrl+a", "Move cursor to start of line"),
+    ("", "", "Ctrl+e", "Move cursor to end of line"),
+    ("", "", "Backspace, Ctrl+h", "Delete word"),
+    ("Help", "", "Esc, q, ?", "Return to normal mode"),
+];
+
+pub(crate) const HELP_ROW_COUNT: usize = HELP_ROWS.len();
+
 pub fn help<'a>() -> Table<'a> {
-    let rows = vec![
-        // Header
-        Row::new(vec![
-            Cell::from("Mode").style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Cell::from("Tabs").style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Cell::from("Key").style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Cell::from("Description").style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
-        // Normal mode
-        Row::new(vec![
-            Cell::from("Normal Mode"),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("Tab"),
-            Cell::from("Change tab"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("q, Ctrl+c, Esc"),
-            Cell::from("Quit"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("r"),
-            Cell::from("Reload list"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("u"),
-            Cell::from("Search users"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("?"),
-            Cell::from("Show help popup"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("/"),
-            Cell::from("Search mode"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications"),
-            Cell::from("n"),
-            Cell::from("New post popup"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications"),
-            Cell::from("N"),
-            Cell::from("Reply selected post popup"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("j, Ctrl+n, Down"),
-            Cell::from("Select next post"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Notifications/Search"),
-            Cell::from("k, Ctrl+p, Up"),
-            Cell::from("Select previous post"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("l, Right"),
-            Cell::from("Next page"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("h, Left"),
-            Cell::from("Prev page"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("Enter"),
-            Cell::from("Open selected post images"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("b"),
-            Cell::from("Selected post open in browser"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("t"),
-            Cell::from("Open selected post thread"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search/Thread"),
-            Cell::from("e"),
-            Cell::from("Open link or video embed"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search/Thread"),
-            Cell::from("f"),
-            Cell::from("Select URL, mention, or hashtag"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search/Thread"),
-            Cell::from("L / R / Q"),
-            Cell::from("Show Likes / Reposts / Quotes"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Notifications"),
-            Cell::from("Enter, b"),
-            Cell::from("Open notification post in browser"),
-        ]),
-        Row::new(vec![
-            Cell::from("Image Viewer"),
-            Cell::from(""),
-            Cell::from("h/l, Left/Right"),
-            Cell::from("Show previous/next image"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("q, Esc"),
-            Cell::from("Close image viewer"),
-        ]),
-        Row::new(vec![
-            Cell::from("Thread"),
-            Cell::from(""),
-            Cell::from("j/k, Up/Down"),
-            Cell::from("Move through ancestors and replies"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("b / q, Esc"),
-            Cell::from("Open in browser / close thread"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("Ctrl+r"),
-            Cell::from("Repost selected post (unrepost if already reposted)"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from("Home/Search"),
-            Cell::from("Ctrl+l"),
-            Cell::from("Like selected post (unlike if already liked)"),
-        ]),
-        // Post mode
-        Row::new(vec![
-            Cell::from("Post/Reply/Search"),
-            Cell::from(""),
-            Cell::from("Esc"),
-            Cell::from("Return to normal mode"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("Ctrl+s / Enter"),
-            Cell::from("Send post/reply / insert newline"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("Left, Ctrl+b"),
-            Cell::from("Move cursor left"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("Right, Ctrl+f"),
-            Cell::from("Move cursor right"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("Ctrl+a"),
-            Cell::from("Move cursor to start of line"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("Ctrl+e"),
-            Cell::from("Move cursor to end of line"),
-        ]),
-        Row::new(vec![
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from("Backspace, Ctrl+h"),
-            Cell::from("Delete word"),
-        ]),
-        // Help mode
-        Row::new(vec![
-            Cell::from("Help"),
-            Cell::from(""),
-            Cell::from("Esc, q, ?"),
-            Cell::from("Return to normal mode"),
-        ]),
-    ];
+    let header_style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let header = Row::new(["Mode", "Tabs", "Key", "Description"])
+        .style(header_style)
+        .bottom_margin(1);
+    let rows = HELP_ROWS.iter().map(|(mode, tabs, key, description)| {
+        Row::new([
+            Cell::from(*mode),
+            Cell::from(*tabs),
+            Cell::from(*key),
+            Cell::from(*description),
+        ])
+    });
 
     Table::new(
         rows,
         [
-            Constraint::Length(15),
-            Constraint::Length(25),
+            Constraint::Length(17),
+            Constraint::Length(26),
             Constraint::Length(20),
-            Constraint::Percentage(80),
+            Constraint::Min(24),
         ],
     )
+    .header(header)
+    .row_highlight_style(FOCUSED_POST_STYLE)
+    .highlight_symbol("▸ ")
     .block(
         Block::default()
-            .title("Help")
+            .title(" Help — j/k or ↑/↓ move, PgUp/PgDn jump, q/Esc/? close ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White).bg(Color::Black))
             .border_type(BorderType::Plain),

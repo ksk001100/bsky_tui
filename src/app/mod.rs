@@ -8,6 +8,7 @@ pub mod ui;
 
 use atrium_api::types::string::{Did, Handle};
 use bsky_sdk::BskyAgent;
+use ratatui::widgets::TableState;
 use tui_input::{Input, InputRequest};
 
 use self::images::ImageCache;
@@ -89,6 +90,7 @@ pub struct App {
     image_viewer: Option<ImageViewer>,
     facet_viewer: Option<FacetViewer>,
     interaction_viewer: Option<InteractionViewer>,
+    pub(crate) help_table_state: TableState,
 }
 
 impl App {
@@ -105,6 +107,7 @@ impl App {
             image_viewer: None,
             facet_viewer: None,
             interaction_viewer: None,
+            help_table_state: TableState::default().with_selected(Some(0)),
         }
     }
 
@@ -717,6 +720,38 @@ impl App {
                 self.state.set_mode(state::Mode::Normal);
                 AppReturn::Continue
             }
+            Key::Char('j') | Key::Down => {
+                let selected = self.help_table_state.selected().unwrap_or(0);
+                self.help_table_state
+                    .select(Some((selected + 1).min(ui::HELP_ROW_COUNT - 1)));
+                AppReturn::Continue
+            }
+            Key::Char('k') | Key::Up => {
+                let selected = self.help_table_state.selected().unwrap_or(0);
+                self.help_table_state
+                    .select(Some(selected.saturating_sub(1)));
+                AppReturn::Continue
+            }
+            Key::PageDown => {
+                let selected = self.help_table_state.selected().unwrap_or(0);
+                self.help_table_state
+                    .select(Some((selected + 10).min(ui::HELP_ROW_COUNT - 1)));
+                AppReturn::Continue
+            }
+            Key::PageUp => {
+                let selected = self.help_table_state.selected().unwrap_or(0);
+                self.help_table_state
+                    .select(Some(selected.saturating_sub(10)));
+                AppReturn::Continue
+            }
+            Key::Home => {
+                self.help_table_state.select(Some(0));
+                AppReturn::Continue
+            }
+            Key::End => {
+                self.help_table_state.select(Some(ui::HELP_ROW_COUNT - 1));
+                AppReturn::Continue
+            }
             _ => AppReturn::Continue,
         }
     }
@@ -1001,5 +1036,27 @@ mod tests {
         viewer.next();
         viewer.next();
         assert_eq!(viewer.index, 1);
+    }
+
+    #[tokio::test]
+    async fn help_navigation_moves_and_stays_within_bounds() {
+        let (io_tx, _io_rx) = tokio::sync::mpsc::channel(1);
+        let mut app = App::new(io_tx);
+
+        app.help_action(Key::Up).await;
+        assert_eq!(app.help_table_state.selected(), Some(0));
+
+        app.help_action(Key::PageDown).await;
+        assert_eq!(app.help_table_state.selected(), Some(10));
+
+        app.help_action(Key::End).await;
+        app.help_action(Key::Down).await;
+        assert_eq!(
+            app.help_table_state.selected(),
+            Some(ui::HELP_ROW_COUNT - 1)
+        );
+
+        app.help_action(Key::Home).await;
+        assert_eq!(app.help_table_state.selected(), Some(0));
     }
 }

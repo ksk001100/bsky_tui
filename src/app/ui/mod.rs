@@ -1,6 +1,8 @@
 mod draw;
 mod layout;
 
+pub(crate) use draw::HELP_ROW_COUNT;
+
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Position},
@@ -72,9 +74,9 @@ where
 
     if app.state.is_help_mode() {
         let popup = draw::help();
-        let area = layout::popup(60, 40, size);
+        let area = layout::popup(90, 80, size);
         f.render_widget(Clear, area);
-        f.render_widget(popup, area);
+        f.render_stateful_widget(popup, area, &mut app.help_table_state);
     }
 
     if app.state.is_post_mode() {
