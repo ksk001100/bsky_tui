@@ -14,6 +14,16 @@ pub enum IoEvent {
     SearchRepost,
     SearchReply,
     LoadThread(String),
+    LoadInteractions(InteractionKind, String, atrium_api::types::string::Cid),
+    SearchUsers(String),
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum InteractionKind {
+    Likes,
+    Reposts,
+    Quotes,
+    Users,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

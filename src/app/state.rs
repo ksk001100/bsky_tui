@@ -21,6 +21,7 @@ pub enum Mode {
     Reply,
     Help,
     Search,
+    UserSearch,
     Thread,
 }
 
@@ -32,6 +33,7 @@ impl fmt::Display for Mode {
             Mode::Reply => "Reply",
             Mode::Help => "Help",
             Mode::Search => "Search",
+            Mode::UserSearch => "User Search",
             Mode::Thread => "Thread",
         };
         write!(f, "{}", str)
@@ -588,6 +590,16 @@ impl AppState {
         } else {
             false
         }
+    }
+
+    pub fn is_user_search_mode(&self) -> bool {
+        matches!(
+            self,
+            Self::Initialized {
+                mode: Mode::UserSearch,
+                ..
+            }
+        )
     }
 
     pub fn get_tl_list_state(&self) -> ListState {

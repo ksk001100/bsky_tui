@@ -6,10 +6,14 @@ use unicode_segmentation::UnicodeSegmentation;
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
-        actor::get_preferences,
+        actor::{get_preferences, search_actors},
         embed::{record::ViewRecordRefs, record_with_media::ViewMediaRefs},
-        feed::{defs, get_post_thread, get_timeline, post, search_posts},
+        feed::{
+            defs, get_likes, get_post_thread, get_quotes, get_reposted_by, get_timeline, post,
+            search_posts,
+        },
         notification,
+        richtext::facet,
     },
     com::atproto::{repo, server},
     record::KnownRecord,
@@ -24,6 +28,20 @@ use bsky_sdk::api::types::TryFromUnknown;
 use bsky_sdk::BskyAgent;
 
 use crate::app::moderation::ModerationPrefs;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PostFacet {
+    pub label: String,
+    pub kind: &'static str,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InteractionItem {
+    pub title: String,
+    pub subtitle: String,
+    pub url: String,
+}
 
 pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
 
@@ -152,6 +170,99 @@ pub async fn post_thread(agent: &BskyAgent, uri: String) -> Result<get_post_thre
         .await?)
 }
 
+pub async fn post_likes(agent: &BskyAgent, uri: String, cid: Cid) -> Result<Vec<InteractionItem>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_likes(
+            get_likes::ParametersData {
+                cid: Some(cid),
+                cursor: None,
+                limit: None,
+                uri,
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .likes
+        .iter()
+        .map(|like| profile_interaction(&like.actor))
+        .collect())
+}
+
+pub async fn post_reposts(
+    agent: &BskyAgent,
+    uri: String,
+    cid: Cid,
+) -> Result<Vec<InteractionItem>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_reposted_by(
+            get_reposted_by::ParametersData {
+                cid: Some(cid),
+                cursor: None,
+                limit: None,
+                uri,
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .reposted_by
+        .iter()
+        .map(|profile| profile_interaction(profile))
+        .collect())
+}
+
+pub async fn post_quotes(agent: &BskyAgent, uri: String, cid: Cid) -> Result<Vec<InteractionItem>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_quotes(
+            get_quotes::ParametersData {
+                cid: Some(cid),
+                cursor: None,
+                limit: None,
+                uri,
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .posts
+        .iter()
+        .map(|post| InteractionItem {
+            title: format!(
+                "{} @{}",
+                post.author.display_name.clone().unwrap_or_default(),
+                post.author.handle.as_str()
+            ),
+            subtitle: post::Record::try_from_unknown(post.record.clone())
+                .map(|record| record.text.clone())
+                .unwrap_or_else(|_| "[Post unavailable]".to_owned()),
+            url: get_url(post.author.handle.clone(), post.uri.clone()).unwrap_or_default(),
+        })
+        .collect())
+}
+
+fn profile_interaction(
+    profile: &atrium_api::app::bsky::actor::defs::ProfileViewData,
+) -> InteractionItem {
+    InteractionItem {
+        title: profile.display_name.clone().unwrap_or_default(),
+        subtitle: format!("@{}", profile.handle.as_str()),
+        url: format!("https://bsky.app/profile/{}", profile.did.as_str()),
+    }
+}
+
 pub async fn search(
     agent: &BskyAgent,
     query: String,
@@ -182,6 +293,29 @@ pub async fn search(
         .await?;
 
     Ok(search_result)
+}
+
+pub async fn search_users(agent: &BskyAgent, query: String) -> Result<Vec<InteractionItem>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .actor
+        .search_actors(
+            search_actors::ParametersData {
+                cursor: None,
+                limit: None,
+                q: Some(query),
+                term: None,
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .actors
+        .iter()
+        .map(|profile| profile_interaction(profile))
+        .collect())
 }
 
 pub fn post_image_urls(post: &defs::PostViewData, moderation: &ModerationPrefs) -> Vec<String> {
@@ -283,6 +417,104 @@ pub fn post_embed_url(post: &defs::PostViewData) -> Option<String> {
         },
         _ => None,
     }
+}
+
+pub fn post_facets(post: &defs::PostViewData) -> Vec<PostFacet> {
+    let Ok(record) = post::Record::try_from_unknown(post.record.clone()) else {
+        return Vec::new();
+    };
+    facets_from_record(&record)
+}
+
+pub fn feed_context_lines(feed: &defs::FeedViewPostData) -> Vec<String> {
+    let mut lines = Vec::new();
+    match &feed.reason {
+        Some(Union::Refs(defs::FeedViewPostReasonRefs::ReasonRepost(reason))) => {
+            lines.push(format!("🔁 Reposted by @{}", reason.by.handle.as_str()))
+        }
+        Some(Union::Refs(defs::FeedViewPostReasonRefs::ReasonPin(_))) => {
+            lines.push("📌 Pinned post".to_owned());
+        }
+        Some(Union::Unknown(_)) | None => {}
+    }
+    if feed
+        .post
+        .viewer
+        .as_ref()
+        .and_then(|viewer| viewer.pinned)
+        .unwrap_or(false)
+        && !lines.iter().any(|line| line.contains("Pinned"))
+    {
+        lines.push("📌 Pinned post".to_owned());
+    }
+    if let Some(reply) = &feed.reply {
+        let context = match &reply.parent {
+            Union::Refs(defs::ReplyRefParentRefs::PostView(parent)) => {
+                format!("↪ Reply to @{}", parent.author.handle.as_str())
+            }
+            Union::Refs(defs::ReplyRefParentRefs::NotFoundPost(_)) => {
+                "↪ Reply to [unavailable post]".to_owned()
+            }
+            Union::Refs(defs::ReplyRefParentRefs::BlockedPost(_)) => {
+                "↪ Reply to [blocked post]".to_owned()
+            }
+            Union::Unknown(_) => "↪ Reply to [unsupported post]".to_owned(),
+        };
+        lines.push(context);
+    }
+    lines
+}
+
+pub fn verification_badge(post: &defs::PostViewData) -> &'static str {
+    let Some(verification) = &post.author.verification else {
+        return "";
+    };
+    if verification.trusted_verifier_status == "valid" {
+        "◆"
+    } else if verification.verified_status == "valid" {
+        "✓"
+    } else {
+        ""
+    }
+}
+
+fn facets_from_record(record: &post::RecordData) -> Vec<PostFacet> {
+    record
+        .facets
+        .iter()
+        .flatten()
+        .flat_map(|facet| {
+            let label = record
+                .text
+                .get(facet.index.byte_start..facet.index.byte_end)
+                .unwrap_or_default()
+                .to_owned();
+            facet.features.iter().filter_map(move |feature| {
+                let (kind, url) = match feature {
+                    Union::Refs(facet::MainFeaturesItem::Link(link)) => ("URL", link.uri.clone()),
+                    Union::Refs(facet::MainFeaturesItem::Mention(mention)) => (
+                        "Mention",
+                        format!("https://bsky.app/profile/{}", mention.did.as_str()),
+                    ),
+                    Union::Refs(facet::MainFeaturesItem::Tag(tag)) => {
+                        let mut url = reqwest::Url::parse("https://bsky.app/hashtag/").ok()?;
+                        url.path_segments_mut().ok()?.push(&tag.tag);
+                        ("Hashtag", url.into())
+                    }
+                    Union::Unknown(_) => return None,
+                };
+                Some(PostFacet {
+                    label: if label.is_empty() {
+                        url.clone()
+                    } else {
+                        label.clone()
+                    },
+                    kind,
+                    url,
+                })
+            })
+        })
+        .collect()
 }
 
 fn video_lines(video: &atrium_api::app::bsky::embed::video::View) -> Vec<String> {
@@ -640,4 +872,94 @@ pub async fn toggle_repost_post_view(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn facets_use_utf8_byte_ranges_and_build_safe_targets() {
+        let text = "日本 https://example.com #青".to_owned();
+        let link_start = text.find("https").expect("link is present");
+        let link_end = link_start + "https://example.com".len();
+        let tag_start = text.find("#青").expect("tag is present");
+        let record = post::RecordData {
+            created_at: Datetime::now(),
+            embed: None,
+            entities: None,
+            facets: Some(vec![
+                facet::MainData {
+                    features: vec![Union::Refs(facet::MainFeaturesItem::Link(Box::new(
+                        facet::LinkData {
+                            uri: "https://example.com/full".to_owned(),
+                        }
+                        .into(),
+                    )))],
+                    index: facet::ByteSliceData {
+                        byte_start: link_start,
+                        byte_end: link_end,
+                    }
+                    .into(),
+                }
+                .into(),
+                facet::MainData {
+                    features: vec![Union::Refs(facet::MainFeaturesItem::Tag(Box::new(
+                        facet::TagData {
+                            tag: "青".to_owned(),
+                        }
+                        .into(),
+                    )))],
+                    index: facet::ByteSliceData {
+                        byte_start: tag_start,
+                        byte_end: text.len(),
+                    }
+                    .into(),
+                }
+                .into(),
+            ]),
+            labels: None,
+            langs: None,
+            reply: None,
+            tags: None,
+            text,
+        };
+
+        let facets = facets_from_record(&record);
+        assert_eq!(facets[0].label, "https://example.com");
+        assert_eq!(facets[0].url, "https://example.com/full");
+        assert_eq!(facets[1].label, "#青");
+        assert!(facets[1].url.ends_with("/%E9%9D%92"));
+    }
+
+    #[test]
+    fn invalid_facet_byte_range_does_not_panic() {
+        let record = post::RecordData {
+            created_at: Datetime::now(),
+            embed: None,
+            entities: None,
+            facets: Some(vec![facet::MainData {
+                features: vec![Union::Refs(facet::MainFeaturesItem::Link(Box::new(
+                    facet::LinkData {
+                        uri: "https://example.com".to_owned(),
+                    }
+                    .into(),
+                )))],
+                index: facet::ByteSliceData {
+                    byte_start: 1,
+                    byte_end: 999,
+                }
+                .into(),
+            }
+            .into()]),
+            labels: None,
+            langs: None,
+            reply: None,
+            tags: None,
+            text: "青".to_owned(),
+        };
+
+        let facets = facets_from_record(&record);
+        assert_eq!(facets[0].label, "https://example.com");
+    }
 }

@@ -13,6 +13,11 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 - Display profile pictures and post image attachments in supported terminals
 - View and browse notifications
 - Search for posts
+- Search for users
+- View post threads and reply trees
+- View quote posts, external link cards, and video/GIF metadata
+- Open URLs, mentions, hashtags, external links, and videos
+- Browse users who liked or reposted a post, and posts quoting it
 - Create new posts
 - Reply to posts
 - Like/unlike posts
@@ -105,6 +110,7 @@ text-cell rendering mode.
 - `q`, `Esc`, `Ctrl+c`: Exit
 - `Tab`: Switch tabs (Home → Notifications → Search → Home)
 - `?`: Show help
+- `u`: Search for users
 
 ### Home Tab
 - `j`, `Down`, `Ctrl+n`: Scroll down
@@ -118,6 +124,10 @@ text-cell rendering mode.
 - `Ctrl+r`: Repost/unrepost
 - `Enter`: Open attached images
 - `b`: Open selected post in browser
+- `t`: Open selected post thread
+- `e`: Open an external link or video embed
+- `f`: Select a URL, mention, or hashtag from the post
+- `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
 - `/`: Switch to search mode
 
 ### Notifications Tab
@@ -139,7 +149,26 @@ text-cell rendering mode.
 - `Ctrl+r`: Repost/unrepost
 - `Enter`: Open attached images
 - `b`: Open selected post in browser
+- `t`: Open selected post thread
+- `e`: Open an external link or video embed
+- `f`: Select a URL, mention, or hashtag from the post
+- `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
 - `/`: Switch to search mode
+
+### Thread Viewer
+- `j`, `Down`, `Ctrl+n`: Move down through the thread
+- `k`, `Up`, `Ctrl+p`: Move up through the thread
+- `b`: Open the selected post in browser
+- `e`: Open an external link or video embed
+- `f`: Select a URL, mention, or hashtag from the post
+- `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
+- `q`, `Esc`: Close the thread
+
+### Facet and Interaction Lists
+- `j`, `Down`: Move down
+- `k`, `Up`: Move up
+- `Enter`, `b`: Open the selected item in browser
+- `q`, `Esc`: Close the list
 
 ### Image Viewer
 - `h`, `Left`: Previous image
@@ -156,7 +185,7 @@ text-cell rendering mode.
 - `Ctrl+e`: Move cursor to end
 - `Backspace`, `Ctrl+h`: Delete previous character
 
-### Search Input Mode
+### Post/User Search Input Mode
 - `Esc`: Cancel
 - `Enter`: Execute search
 - `Left`, `Ctrl+b`: Move cursor left

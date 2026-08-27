@@ -12,6 +12,7 @@ use ratatui::{
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
+use crate::io::InteractionKind;
 use crate::{
     app::moderation::{ModerationDecision, ModerationPrefs},
     app::state::{AppState, Tab},
@@ -74,6 +75,53 @@ pub fn error<'a>(message: &str) -> Paragraph<'a> {
     )
 }
 
+pub fn facets(facets: Vec<bsky::PostFacet>) -> List<'static> {
+    let items = facets
+        .into_iter()
+        .map(|facet| {
+            ListItem::new(vec![
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}: ", facet.kind),
+                        Style::default().fg(Color::LightCyan),
+                    ),
+                    Span::raw(facet.label),
+                ]),
+                Line::from(Span::styled(facet.url, Style::default().fg(Color::Gray))),
+            ])
+        })
+        .collect::<Vec<_>>();
+    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
+        Block::default()
+            .title(" Links — j/k select, Enter open, Esc close ")
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
+}
+
+pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) -> List<'static> {
+    let title = match kind {
+        InteractionKind::Likes => " Likes ",
+        InteractionKind::Reposts => " Reposts ",
+        InteractionKind::Quotes => " Quotes ",
+        InteractionKind::Users => " User Search Results ",
+    };
+    let rows = if items.is_empty() {
+        vec![ListItem::new("(No results)")]
+    } else {
+        items
+            .into_iter()
+            .map(|item| ListItem::new(vec![Line::from(item.title), Line::from(item.subtitle)]))
+            .collect()
+    };
+    List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
+        Block::default()
+            .title(format!("{title}— j/k select, Enter open, Esc close "))
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
+}
+
 pub fn help<'a>() -> Table<'a> {
     let rows = vec![
         // Header
@@ -117,6 +165,12 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from("Home/Notifications/Search"),
             Cell::from("r"),
             Cell::from("Reload list"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Notifications/Search"),
+            Cell::from("u"),
+            Cell::from("Search users"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -189,6 +243,18 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from("Home/Search/Thread"),
             Cell::from("e"),
             Cell::from("Open link or video embed"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Search/Thread"),
+            Cell::from("f"),
+            Cell::from("Select URL, mention, or hashtag"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Search/Thread"),
+            Cell::from("L / R / Q"),
+            Cell::from("Show Likes / Reposts / Quotes"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -331,7 +397,7 @@ pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
         .get_timeline()
         .unwrap_or_default()
         .into_iter()
-        .map(|feed| feed.post.data.clone())
+        .map(|feed| (feed.post.data.clone(), bsky::feed_context_lines(&feed)))
         .collect::<Vec<_>>();
     post_list(
         posts,
@@ -347,7 +413,12 @@ pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
 
 pub fn search_results(state: &AppState, width: u16) -> PostList<'static> {
     post_list(
-        state.get_search_results().unwrap_or_default(),
+        state
+            .get_search_results()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|post| (post, Vec::new()))
+            .collect(),
         state.moderation(),
         width,
         format!(
@@ -427,12 +498,12 @@ pub fn thread(state: &AppState, width: u16) -> List<'static> {
         Block::default()
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1))
-            .title("Thread — j/k move, b browser, Esc close"),
+            .title("Thread — j/k move, b browser, e embed, f facets, Esc close"),
     )
 }
 
 fn post_list(
-    posts: Vec<PostViewData>,
+    posts: Vec<(PostViewData, Vec<String>)>,
     moderation: ModerationPrefs,
     width: u16,
     title: String,
@@ -440,7 +511,7 @@ fn post_list(
     let inner_width = width.saturating_sub(4);
     let rendered = posts
         .iter()
-        .map(|post| render_post(post, &moderation, inner_width))
+        .map(|(post, context)| render_post(post, context, &moderation, inner_width))
         .collect::<Vec<_>>();
     let layouts = rendered.iter().map(|(_, layout)| layout.clone()).collect();
     let items = rendered
@@ -463,6 +534,7 @@ fn post_list(
 
 fn render_post(
     post: &PostViewData,
+    context: &[String],
     moderation: &ModerationPrefs,
     inner_width: u16,
 ) -> (Vec<Line<'static>>, PostLayout) {
@@ -490,17 +562,26 @@ fn render_post(
         text = format!("[{reason}]");
     }
     let prefix = " ".repeat(indent as usize);
-    let mut lines = vec![Line::from(vec![
+    let mut lines = context
+        .iter()
+        .map(|line| {
+            Line::from(Span::styled(
+                line.clone(),
+                Style::default().fg(Color::LightCyan),
+            ))
+        })
+        .collect::<Vec<_>>();
+    lines.push(Line::from(vec![
         Span::raw(prefix.clone()),
         Span::styled(
-            format!("{display_name} "),
+            format!("{display_name}{} ", bsky::verification_badge(post)),
             Style::default().fg(Color::White),
         ),
         Span::styled(
             format!("@{handle} {duration}"),
             Style::default().fg(Color::Gray),
         ),
-    ])];
+    ]));
 
     for line in wrap_text(&text, content_width as usize) {
         lines.push(Line::from(format!("{prefix}{line}")));
@@ -836,6 +917,14 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
+    search_input_with_title(state, "Search posts")
+}
+
+pub fn user_search_input<'a>(state: &AppState) -> Paragraph<'a> {
+    search_input_with_title(state, "Search users")
+}
+
+fn search_input_with_title<'a>(state: &AppState, title: &'a str) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
     Paragraph::new(text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
@@ -844,7 +933,7 @@ pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
             Block::default()
                 .style(Style::default().fg(Color::White))
                 .borders(Borders::ALL)
-                .title("Search")
+                .title(title)
                 .padding(Padding::new(1, 1, 1, 1)),
         )
 }

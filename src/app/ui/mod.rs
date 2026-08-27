@@ -106,8 +106,35 @@ where
         ));
     }
 
+    if app.state.is_user_search_mode() {
+        let popup = draw::user_search_input(app.state());
+        let area = layout::input_popup(size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+        f.set_cursor_position(Position::new(
+            area.x + 2 + app.state.get_input().visual_cursor() as u16,
+            area.y + 2,
+        ));
+    }
+
     if let Some((url, alt, index, total)) = app.current_image_viewer() {
         render_image_viewer(f, app, &url, &alt, index, total, size);
+    }
+
+    if let Some((facets, selected)) = app.current_facet_viewer() {
+        let popup = draw::facets(facets);
+        let area = layout::popup(80, 60, size);
+        let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(selected));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(popup, area, &mut list_state);
+    }
+
+    if let Some((kind, items, selected)) = app.current_interactions() {
+        let popup = draw::interactions(kind, items);
+        let area = layout::popup(80, 70, size);
+        let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(selected));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(popup, area, &mut list_state);
     }
 
     if let Some(message) = app.error() {

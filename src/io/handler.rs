@@ -5,7 +5,7 @@ use bsky_sdk::BskyAgent;
 use eyre::{eyre, Result, WrapErr};
 use tui_input::Input;
 
-use super::{IoEvent, NotificationEvent, SearchEvent, TimelineEvent};
+use super::{InteractionKind, IoEvent, NotificationEvent, SearchEvent, TimelineEvent};
 use crate::{
     app::{auth::AuthCredentials, config::AppConfig, state::Mode, state::Tab, App},
     bsky,
@@ -35,6 +35,10 @@ impl IoAsyncHandler {
             IoEvent::SearchRepost => self.do_search_repost().await,
             IoEvent::SearchReply => self.do_search_reply().await,
             IoEvent::LoadThread(uri) => self.do_load_thread(uri).await,
+            IoEvent::LoadInteractions(kind, uri, cid) => {
+                self.do_load_interactions(kind, uri, cid).await
+            }
+            IoEvent::SearchUsers(query) => self.do_search_users(query).await,
         };
 
         let mut app = self.app.lock().await;
@@ -142,6 +146,32 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         app.state.set_thread(entries);
         app.queue_images(image_urls);
+        Ok(())
+    }
+
+    async fn do_load_interactions(
+        &mut self,
+        kind: InteractionKind,
+        uri: String,
+        cid: atrium_api::types::string::Cid,
+    ) -> Result<()> {
+        let agent = self.agent().await?;
+        let items = match kind {
+            InteractionKind::Likes => bsky::post_likes(agent.as_ref(), uri, cid).await?,
+            InteractionKind::Reposts => bsky::post_reposts(agent.as_ref(), uri, cid).await?,
+            InteractionKind::Quotes => bsky::post_quotes(agent.as_ref(), uri, cid).await?,
+            InteractionKind::Users => return Err(eyre!("invalid post interaction type")),
+        };
+        self.app.lock().await.set_interactions(kind, items);
+        Ok(())
+    }
+
+    async fn do_search_users(&mut self, query: String) -> Result<()> {
+        let items = bsky::search_users(self.agent().await?.as_ref(), query).await?;
+        let mut app = self.app.lock().await;
+        app.state.set_mode(Mode::Normal);
+        app.state.set_input(Input::default());
+        app.set_interactions(InteractionKind::Users, items);
         Ok(())
     }
 
@@ -409,6 +439,8 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::Repost | IoEvent::SearchRepost => "Repost",
         IoEvent::Reply | IoEvent::SearchReply => "Reply",
         IoEvent::LoadThread(_) => "Thread request",
+        IoEvent::LoadInteractions(_, _, _) => "Post interactions request",
+        IoEvent::SearchUsers(_) => "User search",
         IoEvent::Search(_) => "Search",
     }
 }

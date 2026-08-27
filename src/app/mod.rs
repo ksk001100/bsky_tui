@@ -16,7 +16,7 @@ use crate::{
     app::state::Tab,
     bsky,
     inputs::key::Key,
-    io::{IoEvent, NotificationEvent, SearchEvent, TimelineEvent},
+    io::{InteractionKind, IoEvent, NotificationEvent, SearchEvent, TimelineEvent},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -29,6 +29,33 @@ struct ImageViewer {
     urls: Vec<String>,
     alt_texts: Vec<String>,
     index: usize,
+}
+
+struct FacetViewer {
+    facets: Vec<bsky::PostFacet>,
+    index: usize,
+}
+
+struct InteractionViewer {
+    kind: InteractionKind,
+    items: Vec<bsky::InteractionItem>,
+    index: usize,
+}
+
+impl FacetViewer {
+    fn new(facets: Vec<bsky::PostFacet>) -> Option<Self> {
+        (!facets.is_empty()).then_some(Self { facets, index: 0 })
+    }
+
+    fn previous(&mut self) {
+        self.index = self.index.saturating_sub(1);
+    }
+
+    fn next(&mut self) {
+        if self.index + 1 < self.facets.len() {
+            self.index += 1;
+        }
+    }
 }
 
 impl ImageViewer {
@@ -60,6 +87,8 @@ pub struct App {
     pub state: AppState,
     images: ImageCache,
     image_viewer: Option<ImageViewer>,
+    facet_viewer: Option<FacetViewer>,
+    interaction_viewer: Option<InteractionViewer>,
 }
 
 impl App {
@@ -74,6 +103,8 @@ impl App {
             state,
             images: ImageCache::new(),
             image_viewer: None,
+            facet_viewer: None,
+            interaction_viewer: None,
         }
     }
 
@@ -100,6 +131,12 @@ impl App {
         if self.image_viewer.is_some() {
             return self.image_viewer_action(key);
         }
+        if self.facet_viewer.is_some() {
+            return self.facet_viewer_action(key);
+        }
+        if self.interaction_viewer.is_some() {
+            return self.interaction_viewer_action(key);
+        }
 
         match self.state.get_mode() {
             state::Mode::Normal => match self.state.get_tab() {
@@ -111,6 +148,7 @@ impl App {
             state::Mode::Reply => self.reply_action(key).await,
             state::Mode::Help => self.help_action(key).await,
             state::Mode::Search => self.search_input_action(key).await,
+            state::Mode::UserSearch => self.user_search_input_action(key).await,
             state::Mode::Thread => self.thread_action(key).await,
         }
     }
@@ -148,6 +186,11 @@ impl App {
                 self.state.set_input(Input::default());
                 AppReturn::Continue
             }
+            Key::Char('u') => {
+                self.state.set_mode(state::Mode::UserSearch);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
             Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                 self.state.move_tl_scroll_down();
                 AppReturn::Continue
@@ -180,6 +223,26 @@ impl App {
                         .get_current_feed()
                         .map(|feed| feed.post.data.clone()),
                 );
+                AppReturn::Continue
+            }
+            Key::Char('f') => {
+                self.open_facet_viewer(
+                    self.state
+                        .get_current_feed()
+                        .map(|feed| feed.post.data.clone()),
+                );
+                AppReturn::Continue
+            }
+            Key::Char('L') | Key::Char('R') | Key::Char('Q') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    let kind = interaction_kind(key);
+                    self.dispatch(IoEvent::LoadInteractions(
+                        kind,
+                        feed.post.uri.clone(),
+                        feed.post.cid.clone(),
+                    ))
+                    .await;
+                }
                 AppReturn::Continue
             }
             Key::Enter => {
@@ -239,6 +302,11 @@ impl App {
             }
             Key::Char('/') => {
                 self.state.set_mode(state::Mode::Search);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
+            Key::Char('u') => {
+                self.state.set_mode(state::Mode::UserSearch);
                 self.state.set_input(Input::default());
                 AppReturn::Continue
             }
@@ -327,6 +395,11 @@ impl App {
                 self.state.set_input(Input::default());
                 AppReturn::Continue
             }
+            Key::Char('u') => {
+                self.state.set_mode(state::Mode::UserSearch);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
             Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                 self.state.move_search_scroll_down();
                 AppReturn::Continue
@@ -354,6 +427,21 @@ impl App {
             }
             Key::Char('e') => {
                 self.open_selected_embed(self.state.get_current_search_result());
+                AppReturn::Continue
+            }
+            Key::Char('f') => {
+                self.open_facet_viewer(self.state.get_current_search_result());
+                AppReturn::Continue
+            }
+            Key::Char('L') | Key::Char('R') | Key::Char('Q') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.dispatch(IoEvent::LoadInteractions(
+                        interaction_kind(key),
+                        post.uri,
+                        post.cid,
+                    ))
+                    .await;
+                }
                 AppReturn::Continue
             }
             Key::Enter => {
@@ -432,6 +520,19 @@ impl App {
             Key::Char('e') => {
                 self.open_selected_embed(self.state.get_current_thread_post());
             }
+            Key::Char('f') => {
+                self.open_facet_viewer(self.state.get_current_thread_post());
+            }
+            Key::Char('L') | Key::Char('R') | Key::Char('Q') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    self.dispatch(IoEvent::LoadInteractions(
+                        interaction_kind(key),
+                        post.uri,
+                        post.cid,
+                    ))
+                    .await;
+                }
+            }
             _ => {}
         }
         AppReturn::Continue
@@ -495,6 +596,29 @@ impl App {
             }
             _ => AppReturn::Continue,
         }
+    }
+
+    async fn user_search_input_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => {
+                self.state.set_mode(state::Mode::Normal);
+                self.state.set_input(Input::default());
+            }
+            Key::Enter => {
+                let query = self.state.get_input().value().trim().to_owned();
+                if !query.is_empty() {
+                    self.dispatch(IoEvent::SearchUsers(query)).await;
+                }
+            }
+            Key::Left | Key::Ctrl('b') => self.state.move_input_cursor_prev(),
+            Key::Right | Key::Ctrl('f') => self.state.move_input_cursor_next(),
+            Key::Ctrl('a') => self.state.move_input_cursor_start(),
+            Key::Ctrl('e') => self.state.move_input_cursor_end(),
+            Key::Char(c) => self.state.insert_input(InputRequest::InsertChar(c)),
+            Key::Backspace | Key::Ctrl('h') => self.state.remove_input_prev(),
+            _ => {}
+        }
+        AppReturn::Continue
     }
 
     async fn post_action(&mut self, key: Key) -> AppReturn {
@@ -615,6 +739,98 @@ impl App {
         AppReturn::Continue
     }
 
+    fn facet_viewer_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc => self.facet_viewer = None,
+            Key::Char('k') | Key::Up => {
+                if let Some(viewer) = &mut self.facet_viewer {
+                    viewer.previous();
+                }
+            }
+            Key::Char('j') | Key::Down => {
+                if let Some(viewer) = &mut self.facet_viewer {
+                    viewer.next();
+                }
+            }
+            Key::Enter | Key::Char('b') => {
+                let url = self
+                    .facet_viewer
+                    .as_ref()
+                    .and_then(|viewer| viewer.facets.get(viewer.index))
+                    .map(|facet| facet.url.clone());
+                if let Some(url) = url {
+                    if let Err(error) = webbrowser::open(&url) {
+                        self.set_error(format!("Could not open facet: {error}"));
+                    } else {
+                        self.facet_viewer = None;
+                    }
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    fn open_facet_viewer(&mut self, post: Option<atrium_api::app::bsky::feed::defs::PostViewData>) {
+        let facets = post.as_ref().map_or_else(Vec::new, bsky::post_facets);
+        self.facet_viewer = FacetViewer::new(facets);
+        if self.facet_viewer.is_none() {
+            self.set_error("The selected post has no URL, mention, or hashtag".to_owned());
+        }
+    }
+
+    pub fn current_facet_viewer(&self) -> Option<(Vec<bsky::PostFacet>, usize)> {
+        let viewer = self.facet_viewer.as_ref()?;
+        Some((viewer.facets.clone(), viewer.index))
+    }
+
+    fn interaction_viewer_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc => self.interaction_viewer = None,
+            Key::Char('k') | Key::Up => {
+                if let Some(viewer) = &mut self.interaction_viewer {
+                    viewer.index = viewer.index.saturating_sub(1);
+                }
+            }
+            Key::Char('j') | Key::Down => {
+                if let Some(viewer) = &mut self.interaction_viewer {
+                    if viewer.index + 1 < viewer.items.len() {
+                        viewer.index += 1;
+                    }
+                }
+            }
+            Key::Enter | Key::Char('b') => {
+                let url = self
+                    .interaction_viewer
+                    .as_ref()
+                    .and_then(|viewer| viewer.items.get(viewer.index))
+                    .map(|item| item.url.clone());
+                if let Some(url) = url {
+                    if let Err(error) = webbrowser::open(&url) {
+                        self.set_error(format!("Could not open interaction: {error}"));
+                    }
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    pub fn set_interactions(&mut self, kind: InteractionKind, items: Vec<bsky::InteractionItem>) {
+        self.interaction_viewer = Some(InteractionViewer {
+            kind,
+            items,
+            index: 0,
+        });
+    }
+
+    pub fn current_interactions(
+        &self,
+    ) -> Option<(InteractionKind, Vec<bsky::InteractionItem>, usize)> {
+        let viewer = self.interaction_viewer.as_ref()?;
+        Some((viewer.kind, viewer.items.clone(), viewer.index))
+    }
+
     fn open_image_viewer(&mut self, urls: Vec<String>, alt_texts: Vec<String>) {
         self.queue_images(urls.clone());
         self.image_viewer = ImageViewer::new(urls, alt_texts);
@@ -732,6 +948,14 @@ impl App {
     }
 }
 
+fn interaction_kind(key: Key) -> InteractionKind {
+    match key {
+        Key::Char('L') => InteractionKind::Likes,
+        Key::Char('R') => InteractionKind::Reposts,
+        _ => InteractionKind::Quotes,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,5 +979,27 @@ mod tests {
     #[test]
     fn image_viewer_does_not_open_without_attachments() {
         assert!(ImageViewer::new(Vec::new(), Vec::new()).is_none());
+    }
+
+    #[test]
+    fn facet_viewer_stays_within_bounds() {
+        let mut viewer = FacetViewer::new(vec![
+            bsky::PostFacet {
+                label: "one".into(),
+                kind: "URL",
+                url: "https://one.example".into(),
+            },
+            bsky::PostFacet {
+                label: "two".into(),
+                kind: "URL",
+                url: "https://two.example".into(),
+            },
+        ])
+        .expect("viewer should open");
+        viewer.previous();
+        assert_eq!(viewer.index, 0);
+        viewer.next();
+        viewer.next();
+        assert_eq!(viewer.index, 1);
     }
 }
