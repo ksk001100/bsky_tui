@@ -13,6 +13,7 @@ pub enum IoEvent {
     SearchLike,
     SearchRepost,
     SearchReply,
+    LoadThread(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

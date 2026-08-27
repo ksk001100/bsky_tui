@@ -3,7 +3,7 @@ use std::sync::Arc;
 use seahorse::{App as SeahorseApp, Command, Context};
 
 use bsky_tui::{
-    app::{config::AppConfig, App},
+    app::{auth::AuthCredentials, config::AppConfig, App},
     io::{handler::IoAsyncHandler, IoEvent},
     start_ui,
     utils::get_splash,
@@ -17,6 +17,7 @@ fn main() {
         .usage(format!("{} [args]", env!("CARGO_PKG_NAME")))
         .action(action)
         .command(config_command())
+        .command(credentials_command())
         .run(std::env::args().collect());
 }
 
@@ -25,7 +26,7 @@ async fn action(_c: &Context) {
     if !AppConfig::config_exists() {
         let path = AppConfig::config_path();
         println!("Config file not found: {}", path.display());
-        println!("Run `bsky_tui generate` to generate a config file");
+        println!("Run `bsky_tui config` to generate a config file");
         return;
     }
 
@@ -57,6 +58,64 @@ async fn action(_c: &Context) {
     {
         eprintln!("Application error: {error:#}");
     }
+}
+
+fn credentials_command() -> Command {
+    Command::new("credentials")
+        .description("Manage the App Password in the OS keyring")
+        .command(
+            Command::new("set")
+                .description("Save or replace the App Password")
+                .action(|_| {
+                    if let Err(error) = set_credentials() {
+                        eprintln!("Failed to save credentials: {error:#}");
+                    }
+                }),
+        )
+        .command(
+            Command::new("delete")
+                .description("Delete the saved App Password")
+                .action(|_| {
+                    if let Err(error) = delete_credentials() {
+                        eprintln!("Failed to delete credentials: {error:#}");
+                    }
+                }),
+        )
+}
+
+fn set_credentials() -> eyre::Result<()> {
+    let config = load_checked_config()?;
+    let password = zeroize::Zeroizing::new(rpassword::prompt_password("Bluesky App Password: ")?);
+    let confirmation =
+        zeroize::Zeroizing::new(rpassword::prompt_password("Confirm App Password: ")?);
+    if password.as_str() != confirmation.as_str() {
+        eyre::bail!("App Passwords do not match");
+    }
+    AuthCredentials::save(&config.identifier, password.as_str())?;
+    println!(
+        "App Password saved in the OS keyring for {}.",
+        config.identifier
+    );
+    Ok(())
+}
+
+fn delete_credentials() -> eyre::Result<()> {
+    let config = load_checked_config()?;
+    if AuthCredentials::delete(&config.identifier)? {
+        println!("Saved App Password deleted for {}.", config.identifier);
+    } else {
+        println!("No saved App Password was found for {}.", config.identifier);
+    }
+    Ok(())
+}
+
+fn load_checked_config() -> eyre::Result<AppConfig> {
+    if !AppConfig::config_exists() {
+        eyre::bail!("config file not found; run `bsky_tui config` first");
+    }
+    let config = AppConfig::load()?;
+    config.check_required_fields()?;
+    Ok(config)
 }
 
 fn config_command() -> Command {

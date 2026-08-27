@@ -6,7 +6,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
-        embed::record_with_media::ViewMediaRefs,
+        actor::get_preferences,
+        embed::{record::ViewRecordRefs, record_with_media::ViewMediaRefs},
         feed::{defs, get_post_thread, get_timeline, post, search_posts},
         notification,
     },
@@ -19,22 +20,36 @@ use atrium_api::{
 };
 use atrium_xrpc_client::reqwest::ReqwestClient;
 
+use bsky_sdk::api::types::TryFromUnknown;
 use bsky_sdk::BskyAgent;
+
+use crate::app::moderation::ModerationPrefs;
 
 pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
 
 pub async fn agent_with_session(
-    service_url: String,
-    email: String,
-    password: String,
+    service_url: &str,
+    identifier: &str,
+    password: &str,
 ) -> Result<(BskyAgent, server::create_session::Output)> {
     let config = bsky_sdk::agent::config::Config {
-        endpoint: service_url,
+        endpoint: service_url.to_owned(),
         ..Default::default()
     };
     let agent = BskyAgent::builder().config(config).build().await?;
-    let session = agent.login(email, password).await?;
+    let session = agent.login(identifier, password).await?;
     Ok((agent, session))
+}
+
+pub async fn moderation_preferences(agent: &BskyAgent) -> Result<ModerationPrefs> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .actor
+        .get_preferences(get_preferences::ParametersData {}.into())
+        .await?;
+    Ok(ModerationPrefs::from_api(&output.preferences))
 }
 
 pub fn validate_post_text(text: &str) -> Result<()> {
@@ -120,6 +135,23 @@ pub async fn timeline(agent: &BskyAgent, cursor: Option<String>) -> Result<get_t
     Ok(timeline)
 }
 
+pub async fn post_thread(agent: &BskyAgent, uri: String) -> Result<get_post_thread::Output> {
+    Ok(agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_post_thread(
+            get_post_thread::ParametersData {
+                depth: Some(100_u16.try_into().map_err(eyre::Report::msg)?),
+                parent_height: Some(100_u16.try_into().map_err(eyre::Report::msg)?),
+                uri,
+            }
+            .into(),
+        )
+        .await?)
+}
+
 pub async fn search(
     agent: &BskyAgent,
     query: String,
@@ -152,27 +184,142 @@ pub async fn search(
     Ok(search_result)
 }
 
-pub fn post_image_urls(post: &defs::PostViewData) -> Vec<String> {
+pub fn post_image_urls(post: &defs::PostViewData, moderation: &ModerationPrefs) -> Vec<String> {
+    if !moderation.decision(post).permits_media() {
+        return Vec::new();
+    }
     let mut urls = Vec::new();
     if let Some(avatar) = &post.author.avatar {
         urls.push(avatar.clone());
     }
-    urls.extend(post_attachment_urls(post));
+    urls.extend(post_attachment_urls(post, moderation));
     urls
 }
 
-pub fn post_attachment_urls(post: &defs::PostViewData) -> Vec<String> {
-    post_attachments(post)
+pub fn post_attachment_urls(
+    post: &defs::PostViewData,
+    moderation: &ModerationPrefs,
+) -> Vec<String> {
+    if !moderation.decision(post).permits_media() {
+        return Vec::new();
+    }
+    let mut urls = post_attachments(post)
         .iter()
         .map(|image| image.thumb.clone())
-        .collect()
+        .collect::<Vec<_>>();
+    if let Some(thumbnail) = post_embed_thumbnail(post) {
+        urls.push(thumbnail);
+    }
+    urls
 }
 
-pub fn post_attachment_fullsize_urls(post: &defs::PostViewData) -> Vec<String> {
+pub fn post_attachment_fullsize_urls(
+    post: &defs::PostViewData,
+    moderation: &ModerationPrefs,
+) -> Vec<String> {
+    if !moderation.decision(post).permits_media() {
+        return Vec::new();
+    }
     post_attachments(post)
         .iter()
         .map(|image| image.fullsize.clone())
         .collect()
+}
+
+pub fn post_attachment_alt_texts(post: &defs::PostViewData) -> Vec<String> {
+    post_attachments(post)
+        .iter()
+        .map(|image| image.alt.clone())
+        .collect()
+}
+
+pub fn post_embed_lines(post: &defs::PostViewData) -> Vec<String> {
+    let Some(Union::Refs(embed)) = &post.embed else {
+        return Vec::new();
+    };
+    match embed {
+        defs::PostViewEmbedRefs::AppBskyEmbedImagesView(_) => Vec::new(),
+        defs::PostViewEmbedRefs::AppBskyEmbedVideoView(video) => video_lines(video),
+        defs::PostViewEmbedRefs::AppBskyEmbedExternalView(external) => vec![
+            format!("Link: {}", external.external.title),
+            external.external.description.clone(),
+            external.external.uri.clone(),
+        ],
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordView(record) => record_lines(record),
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(embed) => {
+            let mut lines = match &embed.media {
+                Union::Refs(ViewMediaRefs::AppBskyEmbedImagesView(_)) => Vec::new(),
+                Union::Refs(ViewMediaRefs::AppBskyEmbedVideoView(video)) => video_lines(video),
+                Union::Refs(ViewMediaRefs::AppBskyEmbedExternalView(external)) => vec![
+                    format!("Link: {}", external.external.title),
+                    external.external.description.clone(),
+                    external.external.uri.clone(),
+                ],
+                Union::Unknown(_) => vec!["[Unsupported media embed]".to_owned()],
+            };
+            lines.extend(record_lines(&embed.record));
+            lines
+        }
+    }
+}
+
+pub fn post_embed_url(post: &defs::PostViewData) -> Option<String> {
+    let Union::Refs(embed) = post.embed.as_ref()? else {
+        return None;
+    };
+    match embed {
+        defs::PostViewEmbedRefs::AppBskyEmbedVideoView(video) => Some(video.playlist.clone()),
+        defs::PostViewEmbedRefs::AppBskyEmbedExternalView(external) => {
+            Some(external.external.uri.clone())
+        }
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(embed) => match &embed.media {
+            Union::Refs(ViewMediaRefs::AppBskyEmbedVideoView(video)) => {
+                Some(video.playlist.clone())
+            }
+            Union::Refs(ViewMediaRefs::AppBskyEmbedExternalView(external)) => {
+                Some(external.external.uri.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn video_lines(video: &atrium_api::app::bsky::embed::video::View) -> Vec<String> {
+    vec![
+        "Video/GIF (press e to play externally)".to_owned(),
+        format!("Alt: {}", video.alt.as_deref().unwrap_or("(not provided)")),
+        "Captions: available through the video playlist when provided".to_owned(),
+    ]
+}
+
+fn record_lines(record: &atrium_api::app::bsky::embed::record::View) -> Vec<String> {
+    match &record.record {
+        Union::Refs(ViewRecordRefs::ViewRecord(quoted)) => {
+            let text = post::Record::try_from_unknown(quoted.value.clone())
+                .map(|record| record.text.clone())
+                .unwrap_or_else(|_| "[Quoted record unavailable]".to_owned());
+            vec![
+                format!(
+                    "Quote: {} @{}",
+                    quoted.author.display_name.clone().unwrap_or_default(),
+                    quoted.author.handle.as_str()
+                ),
+                text,
+            ]
+        }
+        Union::Refs(ViewRecordRefs::ViewNotFound(_)) => {
+            vec!["[Quoted post not found or deleted]".to_owned()]
+        }
+        Union::Refs(ViewRecordRefs::ViewBlocked(_)) => {
+            vec!["[Quoted post hidden: blocked author]".to_owned()]
+        }
+        Union::Refs(ViewRecordRefs::ViewDetached(_)) => {
+            vec!["[Quote detached by post author]".to_owned()]
+        }
+        Union::Refs(_) => vec!["[Quoted non-post record]".to_owned()],
+        Union::Unknown(_) => vec!["[Unsupported quoted record]".to_owned()],
+    }
 }
 
 fn post_attachments(
@@ -189,6 +336,26 @@ fn post_attachments(
             _ => &[],
         },
         _ => &[],
+    }
+}
+
+fn post_embed_thumbnail(post: &defs::PostViewData) -> Option<String> {
+    let Union::Refs(embed) = post.embed.as_ref()? else {
+        return None;
+    };
+    match embed {
+        defs::PostViewEmbedRefs::AppBskyEmbedVideoView(video) => video.thumbnail.clone(),
+        defs::PostViewEmbedRefs::AppBskyEmbedExternalView(external) => {
+            external.external.thumb.clone()
+        }
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(embed) => match &embed.media {
+            Union::Refs(ViewMediaRefs::AppBskyEmbedVideoView(video)) => video.thumbnail.clone(),
+            Union::Refs(ViewMediaRefs::AppBskyEmbedExternalView(external)) => {
+                external.external.thumb.clone()
+            }
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -417,6 +584,22 @@ pub fn get_url(handle: Handle, uri: String) -> Option<String> {
         Some(format!("https://bsky.app/profile/{handle}/post/{id}"))
     } else {
         None
+    }
+}
+
+pub fn notification_post_url(
+    notification: &notification::list_notifications::Notification,
+    own_handle: &Handle,
+) -> Option<String> {
+    match notification.reason.as_str() {
+        "reply" | "mention" | "quote" => {
+            get_url(notification.author.handle.clone(), notification.uri.clone())
+        }
+        "like" | "repost" => notification
+            .reason_subject
+            .as_ref()
+            .and_then(|uri| get_url(own_handle.clone(), uri.clone())),
+        _ => None,
     }
 }
 

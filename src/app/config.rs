@@ -7,8 +7,8 @@ use toml;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct AppConfig {
-    pub email: String,
-    pub password: String,
+    #[serde(alias = "email")]
+    pub identifier: String,
     #[serde(default = "default_service_url")]
     pub service_url: String,
     pub skip_splash: bool,
@@ -18,8 +18,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            email: String::new(),
-            password: String::new(),
+            identifier: String::new(),
             service_url: default_service_url(),
             skip_splash: false,
             splash_path: None,
@@ -28,15 +27,9 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    pub fn new(
-        email: String,
-        password: String,
-        skip_splash: bool,
-        splash_path: Option<String>,
-    ) -> Self {
+    pub fn new(identifier: String, skip_splash: bool, splash_path: Option<String>) -> Self {
         Self {
-            email,
-            password,
+            identifier,
             service_url: default_service_url(),
             skip_splash,
             splash_path,
@@ -49,11 +42,8 @@ impl AppConfig {
     }
 
     pub fn check_required_fields(&self) -> Result<()> {
-        if self.email.is_empty() {
-            eyre::bail!("email is required");
-        }
-        if self.password.is_empty() {
-            eyre::bail!("password is required");
+        if self.identifier.trim().is_empty() {
+            eyre::bail!("identifier is required");
         }
         if self.service_url.trim().is_empty() {
             eyre::bail!("service_url is required");
@@ -76,7 +66,7 @@ impl AppConfig {
         std::fs::create_dir_all(prefix)?;
 
         let content = format!(
-            "# Use a Bluesky App Password here, not your account password.\n{}",
+            "# Store the App Password with `bsky_tui credentials set`.\n{}",
             toml::to_string(&Self::default())?
         );
         #[cfg(unix)]

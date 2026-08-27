@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use atrium_api::{app::bsky::feed::post::ReplyRefData, com::atproto::repo::strong_ref};
 use bsky_sdk::BskyAgent;
-use eyre::{eyre, Result};
+use eyre::{eyre, Result, WrapErr};
 use tui_input::Input;
 
 use super::{IoEvent, NotificationEvent, SearchEvent, TimelineEvent};
 use crate::{
-    app::{config::AppConfig, state::Mode, state::Tab, App},
+    app::{auth::AuthCredentials, config::AppConfig, state::Mode, state::Tab, App},
     bsky,
 };
 
@@ -34,6 +34,7 @@ impl IoAsyncHandler {
             IoEvent::SearchLike => self.do_search_like().await,
             IoEvent::SearchRepost => self.do_search_repost().await,
             IoEvent::SearchReply => self.do_search_reply().await,
+            IoEvent::LoadThread(uri) => self.do_load_thread(uri).await,
         };
 
         let mut app = self.app.lock().await;
@@ -55,15 +56,25 @@ impl IoAsyncHandler {
 
     async fn do_initialize(&mut self) -> Result<()> {
         let config = AppConfig::load()?;
+        let identifier = config.identifier.clone();
+        let credentials = tokio::task::spawn_blocking(move || AuthCredentials::load(&identifier))
+            .await
+            .wrap_err("credential lookup task failed")??;
         let (agent, session) = bsky::agent_with_session(
-            config.service_url.clone(),
-            config.email.clone(),
-            config.password.clone(),
+            &config.service_url,
+            &config.identifier,
+            credentials.app_password(),
         )
         .await?;
+        let moderation = bsky::moderation_preferences(&agent).await?;
         {
             let mut app = self.app.lock().await;
-            app.initialized(agent, session.handle.clone(), session.did.clone(), config);
+            app.initialized(
+                agent,
+                session.handle.clone(),
+                session.did.clone(),
+                moderation,
+            );
         }
         self.do_load_timeline(TimelineEvent::Load).await
     }
@@ -93,10 +104,11 @@ impl IoAsyncHandler {
         }
 
         let timeline = bsky::timeline(self.agent().await?.as_ref(), cursor.clone()).await?;
+        let moderation = self.app.lock().await.state.moderation();
         let image_urls = timeline
             .feed
             .iter()
-            .flat_map(|feed| bsky::post_image_urls(&feed.post))
+            .flat_map(|feed| bsky::post_image_urls(&feed.post, &moderation))
             .collect::<Vec<_>>();
         let page_cursors = updated_cursors(
             if matches!(event, TimelineEvent::Load) {
@@ -114,6 +126,21 @@ impl IoAsyncHandler {
         app.state.set_cursors(page_cursors);
         app.state.set_tl_current_cursor_index(target);
         app.state.move_tl_scroll_top();
+        app.queue_images(image_urls);
+        Ok(())
+    }
+
+    async fn do_load_thread(&mut self, uri: String) -> Result<()> {
+        let output = bsky::post_thread(self.agent().await?.as_ref(), uri.clone()).await?;
+        let entries = crate::app::thread::flatten(&output, &uri);
+        let moderation = self.app.lock().await.state.moderation();
+        let image_urls = entries
+            .iter()
+            .filter_map(crate::app::thread::ThreadEntry::post)
+            .flat_map(|post| bsky::post_image_urls(post, &moderation))
+            .collect::<Vec<_>>();
+        let mut app = self.app.lock().await;
+        app.state.set_thread(entries);
         app.queue_images(image_urls);
         Ok(())
     }
@@ -207,10 +234,11 @@ impl IoAsyncHandler {
 
         let results =
             bsky::search(self.agent().await?.as_ref(), query.clone(), cursor.clone()).await?;
+        let moderation = self.app.lock().await.state.moderation();
         let image_urls = results
             .posts
             .iter()
-            .flat_map(|post| bsky::post_image_urls(post))
+            .flat_map(|post| bsky::post_image_urls(post, &moderation))
             .collect::<Vec<_>>();
         let page_cursors = updated_cursors(
             if matches!(event, SearchEvent::Load(_)) {
@@ -380,6 +408,7 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::Like | IoEvent::SearchLike => "Like",
         IoEvent::Repost | IoEvent::SearchRepost => "Repost",
         IoEvent::Reply | IoEvent::SearchReply => "Reply",
+        IoEvent::LoadThread(_) => "Thread request",
         IoEvent::Search(_) => "Search",
     }
 }

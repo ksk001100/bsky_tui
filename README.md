@@ -50,16 +50,34 @@ This will generate a configuration file at:
 Edit the generated configuration file and set the following required fields:
 
 ```toml
-email = "your.email@example.com"  # Your Bluesky account email or handle
-password = "xxxx-xxxx-xxxx-xxxx"  # A Bluesky App Password (not your account password)
+identifier = "your.email@example.com" # Your Bluesky account email or handle
 service_url = "https://bsky.social" # Your PDS/service URL
 skip_splash = false               # Whether to skip the splash screen (optional)
 splash_path = ""                  # Path to a custom splash screen (optional)
 ```
 
-Create an App Password in Bluesky under **Settings → Privacy and security → App passwords**.
-Using an App Password limits the impact if this local configuration is exposed. On Unix,
-new configuration files are created with owner-only (`0600`) permissions.
+Create an App Password in Bluesky under **Settings → Privacy and security → App passwords**,
+then store it in the operating system's credential store. Input is hidden and confirmed before
+the credential is saved:
+
+```bash
+bsky_tui credentials set
+```
+
+This uses macOS Keychain, the Linux Secret Service (for example GNOME Keyring or KWallet), or
+Windows Credential Manager. The App Password is not stored in `config.toml` or in the UI state.
+Existing `email` entries remain supported as an alias for `identifier`; remove any old `password`
+entry from the file. The credential is read only during authentication and its in-process buffer
+is cleared after use.
+
+On a headless Linux system without Secret Service, the environment variable remains available as
+a fallback:
+
+```bash
+BSKY_TUI_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx" bsky_tui
+```
+
+Delete the saved credential with `bsky_tui credentials delete`.
 
 ## Usage
 
@@ -69,6 +87,9 @@ bsky_tui --help
 
 # Generate config file
 bsky_tui config
+
+# Save the App Password in the OS keyring
+bsky_tui credentials set
 
 # Launch the application
 bsky_tui

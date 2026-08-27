@@ -1,6 +1,9 @@
+pub mod auth;
 pub mod config;
 pub mod images;
+pub mod moderation;
 pub mod state;
+pub mod thread;
 pub mod ui;
 
 use atrium_api::types::string::{Did, Handle};
@@ -10,7 +13,7 @@ use tui_input::{Input, InputRequest};
 use self::images::ImageCache;
 use self::state::AppState;
 use crate::{
-    app::{config::AppConfig, state::Tab},
+    app::state::Tab,
     bsky,
     inputs::key::Key,
     io::{IoEvent, NotificationEvent, SearchEvent, TimelineEvent},
@@ -24,12 +27,17 @@ pub enum AppReturn {
 
 struct ImageViewer {
     urls: Vec<String>,
+    alt_texts: Vec<String>,
     index: usize,
 }
 
 impl ImageViewer {
-    fn new(urls: Vec<String>) -> Option<Self> {
-        (!urls.is_empty()).then_some(Self { urls, index: 0 })
+    fn new(urls: Vec<String>, alt_texts: Vec<String>) -> Option<Self> {
+        (!urls.is_empty()).then_some(Self {
+            urls,
+            alt_texts,
+            index: 0,
+        })
     }
 
     fn previous(&mut self) {
@@ -103,6 +111,7 @@ impl App {
             state::Mode::Reply => self.reply_action(key).await,
             state::Mode::Help => self.help_action(key).await,
             state::Mode::Search => self.search_input_action(key).await,
+            state::Mode::Thread => self.thread_action(key).await,
         }
     }
 
@@ -158,13 +167,33 @@ impl App {
                 }
                 AppReturn::Continue
             }
+            Key::Char('t') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    self.dispatch(IoEvent::LoadThread(feed.post.uri.clone()))
+                        .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('e') => {
+                self.open_selected_embed(
+                    self.state
+                        .get_current_feed()
+                        .map(|feed| feed.post.data.clone()),
+                );
+                AppReturn::Continue
+            }
             Key::Enter => {
-                let urls = self
-                    .state
-                    .get_current_feed()
-                    .map(|feed| bsky::post_attachment_fullsize_urls(&feed.post))
-                    .unwrap_or_default();
-                self.open_image_viewer(urls);
+                let moderation = self.state.moderation();
+                let (urls, alt_texts) = self.state.get_current_feed().map_or_else(
+                    || (Vec::new(), Vec::new()),
+                    |feed| {
+                        (
+                            bsky::post_attachment_fullsize_urls(&feed.post, &moderation),
+                            bsky::post_attachment_alt_texts(&feed.post),
+                        )
+                    },
+                );
+                self.open_image_viewer(urls, alt_texts);
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -219,6 +248,25 @@ impl App {
             }
             Key::Up | Key::Char('k') | Key::Ctrl('p') => {
                 self.state.move_notifications_scroll_up();
+                AppReturn::Continue
+            }
+            Key::Enter | Key::Char('b') => {
+                let url = self
+                    .state
+                    .get_current_notification()
+                    .and_then(|notification| {
+                        bsky::notification_post_url(&notification, &self.state.get_handle())
+                    });
+                match url {
+                    Some(url) => {
+                        if let Err(error) = webbrowser::open(&url) {
+                            self.set_error(format!("Could not open notification: {error}"));
+                        }
+                    }
+                    None => self.set_error(
+                        "This notification does not refer to a post that can be opened".to_owned(),
+                    ),
+                }
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -298,13 +346,28 @@ impl App {
                 }
                 AppReturn::Continue
             }
+            Key::Char('t') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.dispatch(IoEvent::LoadThread(post.uri.clone())).await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('e') => {
+                self.open_selected_embed(self.state.get_current_search_result());
+                AppReturn::Continue
+            }
             Key::Enter => {
-                let urls = self
-                    .state
-                    .get_current_search_result()
-                    .map(|post| bsky::post_attachment_fullsize_urls(&post))
-                    .unwrap_or_default();
-                self.open_image_viewer(urls);
+                let moderation = self.state.moderation();
+                let (urls, alt_texts) = self.state.get_current_search_result().map_or_else(
+                    || (Vec::new(), Vec::new()),
+                    |post| {
+                        (
+                            bsky::post_attachment_fullsize_urls(&post, &moderation),
+                            bsky::post_attachment_alt_texts(&post),
+                        )
+                    },
+                );
+                self.open_image_viewer(urls, alt_texts);
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -349,6 +412,41 @@ impl App {
                 AppReturn::Continue
             }
             _ => AppReturn::Continue,
+        }
+    }
+
+    async fn thread_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc => self.state.close_thread(),
+            Key::Down | Key::Char('j') | Key::Ctrl('n') => self.state.move_thread_down(),
+            Key::Up | Key::Char('k') | Key::Ctrl('p') => self.state.move_thread_up(),
+            Key::Char('b') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    if let Some(url) = bsky::get_url(post.author.handle.clone(), post.uri.clone()) {
+                        if let Err(error) = webbrowser::open(&url) {
+                            self.set_error(format!("Could not open thread post: {error}"));
+                        }
+                    }
+                }
+            }
+            Key::Char('e') => {
+                self.open_selected_embed(self.state.get_current_thread_post());
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    fn open_selected_embed(
+        &mut self,
+        post: Option<atrium_api::app::bsky::feed::defs::PostViewData>,
+    ) {
+        let Some(url) = post.as_ref().and_then(bsky::post_embed_url) else {
+            self.set_error("The selected post has no external link or video".to_owned());
+            return;
+        };
+        if let Err(error) = webbrowser::open(&url) {
+            self.set_error(format!("Could not open embedded content: {error}"));
         }
     }
 
@@ -517,15 +615,20 @@ impl App {
         AppReturn::Continue
     }
 
-    fn open_image_viewer(&mut self, urls: Vec<String>) {
+    fn open_image_viewer(&mut self, urls: Vec<String>, alt_texts: Vec<String>) {
         self.queue_images(urls.clone());
-        self.image_viewer = ImageViewer::new(urls);
+        self.image_viewer = ImageViewer::new(urls, alt_texts);
     }
 
-    pub fn current_image_viewer(&self) -> Option<(String, usize, usize)> {
+    pub fn current_image_viewer(&self) -> Option<(String, String, usize, usize)> {
         let viewer = self.image_viewer.as_ref()?;
         Some((
             viewer.urls[viewer.index].clone(),
+            viewer
+                .alt_texts
+                .get(viewer.index)
+                .cloned()
+                .unwrap_or_default(),
             viewer.index + 1,
             viewer.urls.len(),
         ))
@@ -614,8 +717,14 @@ impl App {
         self.error = None;
     }
 
-    pub fn initialized(&mut self, agent: BskyAgent, handle: Handle, did: Did, config: AppConfig) {
-        self.state = AppState::initialized(agent, handle, did, config);
+    pub fn initialized(
+        &mut self,
+        agent: BskyAgent,
+        handle: Handle,
+        did: Did,
+        moderation: moderation::ModerationPrefs,
+    ) {
+        self.state = AppState::initialized(agent, handle, did, moderation);
     }
 
     pub fn loaded(&mut self) {
@@ -629,8 +738,11 @@ mod tests {
 
     #[test]
     fn image_viewer_navigation_wraps_in_both_directions() {
-        let mut viewer = ImageViewer::new(vec!["one".into(), "two".into(), "three".into()])
-            .expect("viewer should open");
+        let mut viewer = ImageViewer::new(
+            vec!["one".into(), "two".into(), "three".into()],
+            vec!["first".into(), "second".into(), "third".into()],
+        )
+        .expect("viewer should open");
 
         viewer.previous();
         assert_eq!(viewer.index, 2);
@@ -642,6 +754,6 @@ mod tests {
 
     #[test]
     fn image_viewer_does_not_open_without_attachments() {
-        assert!(ImageViewer::new(Vec::new()).is_none());
+        assert!(ImageViewer::new(Vec::new(), Vec::new()).is_none());
     }
 }

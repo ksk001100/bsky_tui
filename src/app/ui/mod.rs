@@ -35,6 +35,11 @@ where
         let area = layout::popup(60, 20, size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
+    } else if app.state.is_thread_mode() {
+        let thread = draw::thread(app.state(), body_chunks[1].width);
+        let mut list_state = app.state.get_thread_list_state();
+        list_state.select(Some(app.state.get_thread_list_position()));
+        f.render_stateful_widget(thread, body_chunks[1], &mut list_state);
     } else {
         match app.state.get_tab() {
             Tab::Home => {
@@ -101,8 +106,8 @@ where
         ));
     }
 
-    if let Some((url, index, total)) = app.current_image_viewer() {
-        render_image_viewer(f, app, &url, index, total, size);
+    if let Some((url, alt, index, total)) = app.current_image_viewer() {
+        render_image_viewer(f, app, &url, &alt, index, total, size);
     }
 
     if let Some(message) = app.error() {
@@ -135,6 +140,7 @@ fn render_image_viewer(
     f: &mut Frame,
     app: &mut App,
     url: &str,
+    alt: &str,
     index: usize,
     total: usize,
     screen: ratatui::layout::Rect,
@@ -147,7 +153,19 @@ fn render_image_viewer(
     f.render_widget(Clear, area);
     f.render_widget(block, area);
 
-    let image_area = app.centered_image_area(url, inner);
+    let image_bounds = ratatui::layout::Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(3),
+    );
+    let alt_area = ratatui::layout::Rect::new(
+        inner.x,
+        image_bounds.bottom(),
+        inner.width,
+        inner.height.saturating_sub(image_bounds.height),
+    );
+    let image_area = app.centered_image_area(url, image_bounds);
     if let (Some(image_area), Some(protocol)) = (image_area, app.image_mut(url)) {
         f.render_stateful_widget(
             StatefulImage::default().resize(Resize::Fit(None)),
@@ -157,9 +175,18 @@ fn render_image_viewer(
     } else {
         f.render_widget(
             Paragraph::new("Loading image...").alignment(Alignment::Center),
-            inner,
+            image_bounds,
         );
     }
+    let alt = if alt.trim().is_empty() {
+        "Alt text: (not provided)".to_owned()
+    } else {
+        format!("Alt text: {alt}")
+    };
+    f.render_widget(
+        Paragraph::new(alt).wrap(ratatui::widgets::Wrap { trim: true }),
+        alt_area,
+    );
 }
 
 pub fn render_splash<B>(f: &mut Frame, splash_text: String)

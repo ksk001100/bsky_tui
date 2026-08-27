@@ -11,7 +11,8 @@ use bsky_sdk::BskyAgent;
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
-use crate::app::config::AppConfig;
+use crate::app::moderation::ModerationPrefs;
+use crate::app::thread::ThreadEntry;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Mode {
@@ -20,6 +21,7 @@ pub enum Mode {
     Reply,
     Help,
     Search,
+    Thread,
 }
 
 impl fmt::Display for Mode {
@@ -30,6 +32,7 @@ impl fmt::Display for Mode {
             Mode::Reply => "Reply",
             Mode::Help => "Help",
             Mode::Search => "Search",
+            Mode::Thread => "Thread",
         };
         write!(f, "{}", str)
     }
@@ -76,17 +79,25 @@ pub enum AppState {
         did: Did,
         mode: Mode,
         tab: Tab,
-        config: Box<AppConfig>,
         tl_current_cursor_index: usize,
         cursors: Vec<Option<String>>,
         search_current_cursor_index: usize,
         search_cursors: Vec<Option<String>>,
         search_query: Option<String>,
+        moderation: ModerationPrefs,
+        thread: Option<Vec<ThreadEntry>>,
+        thread_list_state: ListState,
+        thread_list_position: usize,
     },
 }
 
 impl AppState {
-    pub fn initialized(agent: BskyAgent, handle: Handle, did: Did, config: AppConfig) -> Self {
+    pub fn initialized(
+        agent: BskyAgent,
+        handle: Handle,
+        did: Did,
+        moderation: ModerationPrefs,
+    ) -> Self {
         let agent = Arc::new(agent);
         Self::Initialized {
             agent,
@@ -106,12 +117,15 @@ impl AppState {
             did,
             mode: Mode::Normal,
             tab: Tab::Home,
-            config: Box::new(config),
             tl_current_cursor_index: 0,
             cursors: vec![None],
             search_current_cursor_index: 0,
             search_cursors: vec![None],
             search_query: None,
+            moderation,
+            thread: None,
+            thread_list_state: ListState::default(),
+            thread_list_position: 0,
         }
     }
 
@@ -133,6 +147,117 @@ impl AppState {
         } else {
             None
         }
+    }
+
+    pub fn moderation(&self) -> ModerationPrefs {
+        if let Self::Initialized { moderation, .. } = self {
+            moderation.clone()
+        } else {
+            ModerationPrefs::default()
+        }
+    }
+
+    pub fn set_thread(&mut self, entries: Vec<ThreadEntry>) {
+        if let Self::Initialized {
+            thread,
+            thread_list_state,
+            thread_list_position,
+            mode,
+            ..
+        } = self
+        {
+            let selected = entries
+                .iter()
+                .position(|entry| matches!(entry, ThreadEntry::Post { target: true, .. }))
+                .unwrap_or(0);
+            *thread = Some(entries);
+            *thread_list_position = selected;
+            thread_list_state.select(Some(selected));
+            *mode = Mode::Thread;
+        }
+    }
+
+    pub fn get_thread(&self) -> Vec<ThreadEntry> {
+        if let Self::Initialized { thread, .. } = self {
+            thread.clone().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn get_thread_list_state(&self) -> ListState {
+        if let Self::Initialized {
+            thread_list_state, ..
+        } = self
+        {
+            thread_list_state.clone()
+        } else {
+            ListState::default()
+        }
+    }
+
+    pub fn get_thread_list_position(&self) -> usize {
+        if let Self::Initialized {
+            thread_list_position,
+            ..
+        } = self
+        {
+            *thread_list_position
+        } else {
+            0
+        }
+    }
+
+    pub fn get_current_thread_post(&self) -> Option<PostViewData> {
+        self.get_thread()
+            .get(self.get_thread_list_position())
+            .and_then(ThreadEntry::post)
+            .cloned()
+    }
+
+    pub fn move_thread_up(&mut self) {
+        if let Self::Initialized {
+            thread_list_position,
+            thread_list_state,
+            ..
+        } = self
+        {
+            *thread_list_position = thread_list_position.saturating_sub(1);
+            thread_list_state.select(Some(*thread_list_position));
+        }
+    }
+
+    pub fn move_thread_down(&mut self) {
+        if let Self::Initialized {
+            thread,
+            thread_list_position,
+            thread_list_state,
+            ..
+        } = self
+        {
+            let length = thread.as_ref().map_or(0, Vec::len);
+            if *thread_list_position + 1 < length {
+                *thread_list_position += 1;
+                thread_list_state.select(Some(*thread_list_position));
+            }
+        }
+    }
+
+    pub fn close_thread(&mut self) {
+        if let Self::Initialized { mode, thread, .. } = self {
+            *mode = Mode::Normal;
+            *thread = None;
+        }
+    }
+
+    pub fn is_thread_mode(&self) -> bool {
+        matches!(
+            self,
+            Self::Initialized {
+                mode: Mode::Thread,
+                ..
+            }
+        )
     }
 
     pub fn get_did(&self) -> Did {
@@ -542,6 +667,22 @@ impl AppState {
     pub fn get_notifications(&self) -> Option<Vec<Notification>> {
         if let Self::Initialized { notifications, .. } = self {
             notifications.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_current_notification(&self) -> Option<Notification> {
+        if let Self::Initialized {
+            notifications,
+            notifications_list_position,
+            ..
+        } = self
+        {
+            notifications
+                .as_ref()
+                .and_then(|items| items.get(*notifications_list_position))
+                .cloned()
         } else {
             None
         }

@@ -13,7 +13,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 use crate::{
+    app::moderation::{ModerationDecision, ModerationPrefs},
     app::state::{AppState, Tab},
+    app::thread::ThreadEntry,
     bsky, utils,
 };
 
@@ -177,6 +179,24 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from("Selected post open in browser"),
         ]),
         Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Search"),
+            Cell::from("t"),
+            Cell::from("Open selected post thread"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Home/Search/Thread"),
+            Cell::from("e"),
+            Cell::from("Open link or video embed"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from("Notifications"),
+            Cell::from("Enter, b"),
+            Cell::from("Open notification post in browser"),
+        ]),
+        Row::new(vec![
             Cell::from("Image Viewer"),
             Cell::from(""),
             Cell::from("h/l, Left/Right"),
@@ -187,6 +207,18 @@ pub fn help<'a>() -> Table<'a> {
             Cell::from(""),
             Cell::from("q, Esc"),
             Cell::from("Close image viewer"),
+        ]),
+        Row::new(vec![
+            Cell::from("Thread"),
+            Cell::from(""),
+            Cell::from("j/k, Up/Down"),
+            Cell::from("Move through ancestors and replies"),
+        ]),
+        Row::new(vec![
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from("b / q, Esc"),
+            Cell::from("Open in browser / close thread"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -303,6 +335,7 @@ pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
         .collect::<Vec<_>>();
     post_list(
         posts,
+        state.moderation(),
         width,
         format!(
             "Home ({}: {})",
@@ -315,6 +348,7 @@ pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
 pub fn search_results(state: &AppState, width: u16) -> PostList<'static> {
     post_list(
         state.get_search_results().unwrap_or_default(),
+        state.moderation(),
         width,
         format!(
             "Search Results ({}: {})",
@@ -324,11 +358,89 @@ pub fn search_results(state: &AppState, width: u16) -> PostList<'static> {
     )
 }
 
-fn post_list(posts: Vec<PostViewData>, width: u16, title: String) -> PostList<'static> {
+pub fn thread(state: &AppState, width: u16) -> List<'static> {
+    let moderation = state.moderation();
+    let inner_width = width.saturating_sub(4).max(1) as usize;
+    let items = state
+        .get_thread()
+        .into_iter()
+        .map(|entry| {
+            let (depth, lines) =
+                match entry {
+                    ThreadEntry::Placeholder { message, depth } => (depth, vec![message]),
+                    ThreadEntry::Post {
+                        post,
+                        depth,
+                        target,
+                    } => {
+                        let decision = moderation.decision(&post);
+                        let marker = if target { "●" } else { "├" };
+                        let display_name = post.author.display_name.clone().unwrap_or_default();
+                        let handle = post.author.handle.as_str();
+                        let text = match &decision {
+                            ModerationDecision::HideContent { reason } => format!("[{reason}]"),
+                            _ => post::Record::try_from_unknown(post.record.clone())
+                                .map(|record| record.text.clone())
+                                .unwrap_or_else(|_| "[Post record unavailable]".to_owned()),
+                        };
+                        let mut lines = vec![format!(
+                            "{marker} {display_name} @{handle}  ↩ {} 🔁 {} ❤ {}",
+                            post.reply_count.unwrap_or(0),
+                            post.repost_count.unwrap_or(0),
+                            post.like_count.unwrap_or(0)
+                        )];
+                        lines.extend(wrap_text(&text, inner_width.saturating_sub(depth * 2 + 2)));
+                        if !matches!(&decision, ModerationDecision::HideContent { .. }) {
+                            lines.extend(
+                                bsky::post_embed_lines(&post)
+                                    .into_iter()
+                                    .map(|line| format!("│ {line}")),
+                            );
+                        }
+                        if let ModerationDecision::WarnMedia { labels } = decision {
+                            lines.push(format!("[Sensitive media hidden: {}]", labels.join(", ")));
+                        }
+                        lines.extend(bsky::post_attachment_alt_texts(&post).into_iter().map(
+                            |alt| {
+                                if alt.trim().is_empty() {
+                                    "Alt: (not provided)".to_owned()
+                                } else {
+                                    format!("Alt: {alt}")
+                                }
+                            },
+                        ));
+                        (depth, lines)
+                    }
+                };
+            let prefix = "  ".repeat(depth.min(20));
+            ListItem::new(
+                lines
+                    .into_iter()
+                    .map(|line| Line::from(format!("{prefix}{line}")))
+                    .chain(std::iter::once(Line::from("")))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1))
+            .title("Thread — j/k move, b browser, Esc close"),
+    )
+}
+
+fn post_list(
+    posts: Vec<PostViewData>,
+    moderation: ModerationPrefs,
+    width: u16,
+    title: String,
+) -> PostList<'static> {
     let inner_width = width.saturating_sub(4);
     let rendered = posts
         .iter()
-        .map(|post| render_post(post, inner_width))
+        .map(|post| render_post(post, &moderation, inner_width))
         .collect::<Vec<_>>();
     let layouts = rendered.iter().map(|(_, layout)| layout.clone()).collect();
     let items = rendered
@@ -349,7 +461,12 @@ fn post_list(posts: Vec<PostViewData>, width: u16, title: String) -> PostList<'s
     }
 }
 
-fn render_post(post: &PostViewData, inner_width: u16) -> (Vec<Line<'static>>, PostLayout) {
+fn render_post(
+    post: &PostViewData,
+    moderation: &ModerationPrefs,
+    inner_width: u16,
+) -> (Vec<Line<'static>>, PostLayout) {
+    let decision = moderation.decision(post);
     let avatar_width = match inner_width {
         50.. => 8,
         30.. => 6,
@@ -358,17 +475,20 @@ fn render_post(post: &PostViewData, inner_width: u16) -> (Vec<Line<'static>>, Po
     };
     let indent = avatar_width + u16::from(avatar_width > 0) * 2;
     let content_width = inner_width.saturating_sub(indent).max(1);
-    let (text, created_at) = if let Ok(record) = post::Record::try_from_unknown(post.record.clone())
-    {
-        (record.text.clone(), format!("{:?}+0000", record.created_at))
-    } else {
-        (String::new(), String::new())
-    };
+    let (mut text, created_at) =
+        if let Ok(record) = post::Record::try_from_unknown(post.record.clone()) {
+            (record.text.clone(), format!("{:?}+0000", record.created_at))
+        } else {
+            (String::new(), String::new())
+        };
     let duration = DateTime::parse_from_str(&created_at, "%Y-%m-%dT%H:%M:%S%z")
         .map(|date| utils::get_duration_string(date, Utc::now().fixed_offset()))
         .unwrap_or_default();
     let display_name = post.author.display_name.clone().unwrap_or_default();
     let handle = post.author.handle.to_string();
+    if let ModerationDecision::HideContent { reason } = &decision {
+        text = format!("[{reason}]");
+    }
     let prefix = " ".repeat(indent as usize);
     let mut lines = vec![Line::from(vec![
         Span::raw(prefix.clone()),
@@ -386,7 +506,15 @@ fn render_post(post: &PostViewData, inner_width: u16) -> (Vec<Line<'static>>, Po
         lines.push(Line::from(format!("{prefix}{line}")));
     }
 
-    let attachment_urls = bsky::post_attachment_urls(post)
+    if !matches!(&decision, ModerationDecision::HideContent { .. }) {
+        for embed_line in bsky::post_embed_lines(post) {
+            for line in wrap_text(&embed_line, content_width as usize) {
+                lines.push(Line::from(format!("{prefix}│ {line}")));
+            }
+        }
+    }
+
+    let attachment_urls = bsky::post_attachment_urls(post, moderation)
         .into_iter()
         .take(4)
         .collect::<Vec<_>>();
@@ -398,6 +526,23 @@ fn render_post(post: &PostViewData, inner_width: u16) -> (Vec<Line<'static>>, Po
         lines.extend((0..MEDIA_HEIGHT).map(|_| Line::from(" ".repeat(inner_width as usize))));
         Some(media_row)
     };
+
+    if let ModerationDecision::WarnMedia { labels } = &decision {
+        lines.push(Line::from(format!(
+            "{prefix}[Sensitive media hidden: {}]",
+            labels.join(", ")
+        )));
+    }
+    if !matches!(decision, ModerationDecision::HideContent { .. }) {
+        for alt in bsky::post_attachment_alt_texts(post)
+            .into_iter()
+            .filter(|alt| !alt.trim().is_empty())
+        {
+            for line in wrap_text(&format!("Alt: {alt}"), content_width as usize) {
+                lines.push(Line::from(format!("{prefix}{line}")));
+            }
+        }
+    }
 
     lines.push(Line::from(vec![
         Span::raw(prefix),
@@ -425,7 +570,10 @@ fn render_post(post: &PostViewData, inner_width: u16) -> (Vec<Line<'static>>, Po
 
     let layout = PostLayout {
         height: lines.len() as u16,
-        avatar_url: post.author.avatar.clone(),
+        avatar_url: decision
+            .permits_media()
+            .then(|| post.author.avatar.clone())
+            .flatten(),
         attachment_urls,
         avatar_width,
         content_width,
