@@ -24,12 +24,18 @@ fn main() {
 async fn action(_c: &Context) {
     if !AppConfig::config_exists() {
         let path = AppConfig::config_path();
-        println!("Config file not found: {}", path.to_str().unwrap());
+        println!("Config file not found: {}", path.display());
         println!("Run `bsky_tui generate` to generate a config file");
         return;
     }
 
-    let config = AppConfig::load().unwrap();
+    let config = match AppConfig::load() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Failed to load config: {error:#}");
+            return;
+        }
+    };
     if let Err(e) = config.check_required_fields() {
         println!("Config file error: {}", e);
         return;
@@ -47,9 +53,10 @@ async fn action(_c: &Context) {
         }
     });
 
-    start_ui(&app_ui, config.skip_splash, get_splash(config.splash_path))
-        .await
-        .unwrap();
+    if let Err(error) = start_ui(&app_ui, config.skip_splash, get_splash(config.splash_path)).await
+    {
+        eprintln!("Application error: {error:#}");
+    }
 }
 
 fn config_command() -> Command {
@@ -60,14 +67,16 @@ fn config_command() -> Command {
             if AppConfig::config_exists() {
                 println!(
                     "Config file already exists: {}",
-                    AppConfig::config_path().to_str().unwrap()
+                    AppConfig::config_path().display()
                 );
                 return;
             }
-            AppConfig::generate_config_file().unwrap();
-            println!(
-                "Config file generated at: {}",
-                AppConfig::config_path().to_str().unwrap()
-            );
+            match AppConfig::generate_config_file() {
+                Ok(()) => println!(
+                    "Config file generated at: {}",
+                    AppConfig::config_path().display()
+                ),
+                Err(error) => eprintln!("Failed to generate config: {error:#}"),
+            }
         })
 }

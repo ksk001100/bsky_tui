@@ -68,6 +68,8 @@ pub enum AppState {
         tl_list_position: usize,
         notifications_list_state: ListState,
         notifications_list_position: usize,
+        notifications_current_cursor_index: usize,
+        notification_cursors: Vec<Option<String>>,
         search_list_state: ListState,
         search_list_position: usize,
         handle: Handle,
@@ -80,7 +82,6 @@ pub enum AppState {
         search_current_cursor_index: usize,
         search_cursors: Vec<Option<String>>,
         search_query: Option<String>,
-        is_loading: bool,
     },
 }
 
@@ -97,6 +98,8 @@ impl AppState {
             tl_list_position: 0,
             notifications_list_state: ListState::default().with_selected(Some(0)),
             notifications_list_position: 0,
+            notifications_current_cursor_index: 0,
+            notification_cursors: vec![None],
             search_list_state: ListState::default().with_selected(Some(0)),
             search_list_position: 0,
             handle,
@@ -109,7 +112,6 @@ impl AppState {
             search_current_cursor_index: 0,
             search_cursors: vec![None],
             search_query: None,
-            is_loading: false,
         }
     }
 
@@ -225,7 +227,7 @@ impl AppState {
             ..
         } = self
         {
-            if *tl_list_position < feeds.len() - 1 {
+            if *tl_list_position + 1 < feeds.len() {
                 *tl_list_position += 1;
                 tl_list_state.select(Some(*tl_list_position));
             }
@@ -265,7 +267,7 @@ impl AppState {
             ..
         } = self
         {
-            if *notifications_list_position < notifications.len() - 1 {
+            if *notifications_list_position + 1 < notifications.len() {
                 *notifications_list_position += 1;
                 notifications_list_state.select(Some(*notifications_list_position));
             }
@@ -306,7 +308,7 @@ impl AppState {
             ..
         } = self
         {
-            if *search_list_position < results.len() - 1 {
+            if *search_list_position + 1 < results.len() {
                 *search_list_position += 1;
                 search_list_state.select(Some(*search_list_position));
             }
@@ -326,8 +328,17 @@ impl AppState {
     }
 
     pub fn set_timeline(&mut self, f: Option<Vec<FeedViewPost>>) {
-        if let Self::Initialized { timeline, .. } = self {
+        if let Self::Initialized {
+            timeline,
+            tl_list_position,
+            tl_list_state,
+            ..
+        } = self
+        {
+            let is_empty = f.as_ref().is_none_or(Vec::is_empty);
             *timeline = f;
+            *tl_list_position = 0;
+            tl_list_state.select((!is_empty).then_some(0));
         }
     }
 
@@ -340,8 +351,17 @@ impl AppState {
     }
 
     pub fn set_search_results(&mut self, f: Option<Vec<PostViewData>>) {
-        if let Self::Initialized { search_results, .. } = self {
+        if let Self::Initialized {
+            search_results,
+            search_list_position,
+            search_list_state,
+            ..
+        } = self
+        {
+            let is_empty = f.as_ref().is_none_or(Vec::is_empty);
             *search_results = f;
+            *search_list_position = 0;
+            search_list_state.select((!is_empty).then_some(0));
         }
     }
 
@@ -505,8 +525,17 @@ impl AppState {
     }
 
     pub fn set_notifications(&mut self, n: Option<Vec<Notification>>) {
-        if let Self::Initialized { notifications, .. } = self {
+        if let Self::Initialized {
+            notifications,
+            notifications_list_position,
+            notifications_list_state,
+            ..
+        } = self
+        {
+            let is_empty = n.as_ref().is_none_or(Vec::is_empty);
             *notifications = n;
+            *notifications_list_position = 0;
+            notifications_list_state.select((!is_empty).then_some(0));
         }
     }
 
@@ -515,6 +544,50 @@ impl AppState {
             notifications.clone()
         } else {
             None
+        }
+    }
+
+    pub fn get_notifications_current_cursor_index(&self) -> usize {
+        if let Self::Initialized {
+            notifications_current_cursor_index,
+            ..
+        } = self
+        {
+            *notifications_current_cursor_index
+        } else {
+            0
+        }
+    }
+
+    pub fn set_notifications_current_cursor_index(&mut self, index: usize) {
+        if let Self::Initialized {
+            notifications_current_cursor_index,
+            ..
+        } = self
+        {
+            *notifications_current_cursor_index = index;
+        }
+    }
+
+    pub fn get_notification_cursors(&self) -> Vec<Option<String>> {
+        if let Self::Initialized {
+            notification_cursors,
+            ..
+        } = self
+        {
+            notification_cursors.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn set_notification_cursors(&mut self, value: Vec<Option<String>>) {
+        if let Self::Initialized {
+            notification_cursors,
+            ..
+        } = self
+        {
+            *notification_cursors = value;
         }
     }
 
@@ -561,7 +634,7 @@ impl AppState {
             ..
         } = self
         {
-            cursors.get(*tl_current_cursor_index).cloned().unwrap()
+            cursors.get(*tl_current_cursor_index).cloned().flatten()
         } else {
             None
         }
@@ -574,10 +647,7 @@ impl AppState {
             ..
         } = self
         {
-            if *tl_current_cursor_index + 1 == cursors.len() {
-                return None;
-            }
-            cursors.get(*tl_current_cursor_index + 1).cloned().unwrap()
+            cursors.get(*tl_current_cursor_index + 1).cloned().flatten()
         } else {
             None
         }
@@ -593,23 +663,9 @@ impl AppState {
             if *tl_current_cursor_index == 0 {
                 return None;
             }
-            cursors.get(*tl_current_cursor_index - 1).cloned().unwrap()
+            cursors.get(*tl_current_cursor_index - 1).cloned().flatten()
         } else {
             None
-        }
-    }
-
-    pub fn set_loading(&mut self, is_loading: bool) {
-        if let Self::Initialized { is_loading: l, .. } = self {
-            *l = is_loading;
-        }
-    }
-
-    pub fn is_loading(&self) -> bool {
-        if let Self::Initialized { is_loading, .. } = self {
-            *is_loading
-        } else {
-            false
         }
     }
 
@@ -662,7 +718,7 @@ impl AppState {
             search_cursors
                 .get(*search_current_cursor_index)
                 .cloned()
-                .unwrap()
+                .flatten()
         } else {
             None
         }
@@ -675,13 +731,10 @@ impl AppState {
             ..
         } = self
         {
-            if *search_current_cursor_index + 1 == search_cursors.len() {
-                return None;
-            }
             search_cursors
                 .get(*search_current_cursor_index + 1)
                 .cloned()
-                .unwrap()
+                .flatten()
         } else {
             None
         }
@@ -700,7 +753,7 @@ impl AppState {
             search_cursors
                 .get(*search_current_cursor_index - 1)
                 .cloned()
-                .unwrap()
+                .flatten()
         } else {
             None
         }

@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use atrium_api::{app::bsky::feed::post::ReplyRefData, com::atproto::repo::strong_ref};
-use eyre::Result;
+use bsky_sdk::BskyAgent;
+use eyre::{eyre, Result};
 use tui_input::Input;
 
-use super::{IoEvent, SearchEvent, TimelineEvent};
+use super::{IoEvent, NotificationEvent, SearchEvent, TimelineEvent};
 use crate::{
     app::{config::AppConfig, state::Mode, state::Tab, App},
     bsky,
@@ -20,11 +21,12 @@ impl IoAsyncHandler {
     }
 
     pub async fn handle_io_event(&mut self, io_event: IoEvent) {
-        let _ = match io_event {
+        let operation = operation_name(&io_event);
+        let result = match io_event {
             IoEvent::Initialize => self.do_initialize().await,
             IoEvent::LoadTimeline(action) => self.do_load_timeline(action).await,
             IoEvent::SendPost => self.do_send_post().await,
-            IoEvent::LoadNotifications => self.do_load_notifications().await,
+            IoEvent::LoadNotifications(action) => self.do_load_notifications(action).await,
             IoEvent::Like => self.do_like().await,
             IoEvent::Repost => self.do_repost().await,
             IoEvent::Reply => self.do_reply().await,
@@ -36,424 +38,386 @@ impl IoAsyncHandler {
 
         let mut app = self.app.lock().await;
         app.loaded();
+        match result {
+            Ok(()) => app.clear_error(),
+            Err(error) => app.set_error(user_error(operation, &error)),
+        }
+    }
+
+    async fn agent(&self) -> Result<Arc<BskyAgent>> {
+        self.app
+            .lock()
+            .await
+            .state
+            .get_agent()
+            .ok_or_else(|| eyre!("client is not initialized"))
     }
 
     async fn do_initialize(&mut self) -> Result<()> {
+        let config = AppConfig::load()?;
+        let (agent, session) = bsky::agent_with_session(
+            config.service_url.clone(),
+            config.email.clone(),
+            config.password.clone(),
+        )
+        .await?;
         {
-            let config = AppConfig::load()?;
             let mut app = self.app.lock().await;
-            let agent =
-                bsky::agent_with_session(config.email.clone(), config.password.clone()).await?;
-            let session =
-                bsky::session(&agent, config.email.clone(), config.password.clone()).await?;
             app.initialized(agent, session.handle.clone(), session.did.clone(), config);
         }
-        self.do_load_timeline(TimelineEvent::Load).await?;
-
-        Ok(())
+        self.do_load_timeline(TimelineEvent::Load).await
     }
 
     async fn do_load_timeline(&mut self, event: TimelineEvent) -> Result<()> {
-        let current_cursor_index = {
+        let (current, cursors) = {
             let app = self.app.lock().await;
-            app.state.get_tl_current_cursor_index()
+            (
+                app.state.get_tl_current_cursor_index(),
+                app.state.get_cursors(),
+            )
         };
-
-        if current_cursor_index == 0 && event == TimelineEvent::Prev {
+        let target = match event {
+            TimelineEvent::Load => 0,
+            TimelineEvent::Reload => current,
+            TimelineEvent::Prev if current > 0 => current - 1,
+            TimelineEvent::Prev => return Ok(()),
+            TimelineEvent::Next => current + 1,
+        };
+        let cursor = if matches!(event, TimelineEvent::Load) {
+            None
+        } else {
+            cursors.get(target).cloned().flatten()
+        };
+        if matches!(event, TimelineEvent::Next) && cursor.is_none() {
             return Ok(());
         }
 
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_loading(true);
-        }
+        let timeline = bsky::timeline(self.agent().await?.as_ref(), cursor.clone()).await?;
+        let image_urls = timeline
+            .feed
+            .iter()
+            .flat_map(|feed| bsky::post_image_urls(&feed.post))
+            .collect::<Vec<_>>();
+        let page_cursors = updated_cursors(
+            if matches!(event, TimelineEvent::Load) {
+                vec![None]
+            } else {
+                cursors
+            },
+            target,
+            cursor,
+            timeline.cursor.clone(),
+        );
 
-        let agent = {
-            let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
-        };
-        let cursor = match event {
-            TimelineEvent::Load => None,
-            TimelineEvent::Next => {
-                let app = self.app.lock().await;
-                app.state.get_next_cursor()
-            }
-            TimelineEvent::Prev => {
-                let app = self.app.lock().await;
-                app.state.get_prev_cursor()
-            }
-            TimelineEvent::Reload => {
-                let app = self.app.lock().await;
-                app.state.get_current_cursor()
-            }
-        };
-        let current_cursor_index = {
-            let app = self.app.lock().await;
-            app.state.get_tl_current_cursor_index()
-        };
-
-        if event == TimelineEvent::Prev && current_cursor_index == 0 {
-            return Ok(());
-        }
-
-        {
-            let timeline = bsky::timeline(&agent, cursor).await?;
-            let image_urls = timeline
-                .feed
-                .iter()
-                .flat_map(|feed| bsky::post_image_urls(&feed.post))
-                .collect::<Vec<_>>();
-            let mut app = self.app.lock().await;
-            app.state.set_timeline(Some(timeline.feed.clone()));
-            app.queue_images(image_urls);
-
-            match event {
-                TimelineEvent::Load => {
-                    let mut cursors = app.state.get_cursors().clone();
-                    cursors.push(timeline.cursor.clone());
-                    app.state.set_cursors(cursors);
-                }
-                TimelineEvent::Next => {
-                    let mut cursors = app.state.get_cursors().clone();
-                    cursors.push(timeline.cursor.clone());
-                    app.state.set_cursors(cursors);
-                    app.state
-                        .set_tl_current_cursor_index(current_cursor_index + 1);
-                }
-                TimelineEvent::Prev => {
-                    if current_cursor_index == 0 {
-                        return Ok(());
-                    }
-                    app.state
-                        .set_tl_current_cursor_index(current_cursor_index - 1);
-                }
-                _ => (),
-            }
-
-            app.state.move_tl_scroll_top();
-        }
-
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_loading(false);
-        }
-
+        let mut app = self.app.lock().await;
+        app.state.set_timeline(Some(timeline.feed.clone()));
+        app.state.set_cursors(page_cursors);
+        app.state.set_tl_current_cursor_index(target);
+        app.state.move_tl_scroll_top();
+        app.queue_images(image_urls);
         Ok(())
     }
 
     async fn do_send_post(&mut self) -> Result<()> {
-        let agent = {
+        let (did, text) = {
             let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
+            (
+                app.state.get_did(),
+                app.state.get_input().value().to_string(),
+            )
         };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
-        };
-        let text = {
-            let app = self.app.lock().await;
-            app.state.get_input().value().to_string()
-        };
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_mode(Mode::Normal);
-            app.state.set_input(Input::default());
-        }
-        bsky::send_post(&agent, did, text, None).await?;
-        self.do_load_timeline(TimelineEvent::Load).await?;
-
-        Ok(())
+        bsky::validate_post_text(&text)?;
+        bsky::send_post(self.agent().await?.as_ref(), did, text, None).await?;
+        self.finish_composer().await;
+        self.do_load_timeline(TimelineEvent::Reload).await
     }
 
-    async fn do_load_notifications(&mut self) -> Result<()> {
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_loading(true);
-        }
-
-        let agent = {
+    async fn do_load_notifications(&mut self, event: NotificationEvent) -> Result<()> {
+        let (current, cursors) = {
             let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
+            (
+                app.state.get_notifications_current_cursor_index(),
+                app.state.get_notification_cursors(),
+            )
         };
-        let notifications = bsky::notifications(&agent).await?;
+        let target = match event {
+            NotificationEvent::Load => 0,
+            NotificationEvent::Reload => current,
+            NotificationEvent::Prev if current > 0 => current - 1,
+            NotificationEvent::Prev => return Ok(()),
+            NotificationEvent::Next => current + 1,
+        };
+        let cursor = if matches!(event, NotificationEvent::Load) {
+            None
+        } else {
+            cursors.get(target).cloned().flatten()
+        };
+        if matches!(event, NotificationEvent::Next) && cursor.is_none() {
+            return Ok(());
+        }
+        let agent = self.agent().await?;
+        let notifications = bsky::notifications(agent.as_ref(), cursor.clone()).await?;
+        bsky::update_seen(agent.as_ref()).await?;
+        let page_cursors = updated_cursors(
+            if matches!(event, NotificationEvent::Load) {
+                vec![None]
+            } else {
+                cursors
+            },
+            target,
+            cursor,
+            notifications.cursor.clone(),
+        );
         let mut app = self.app.lock().await;
         app.state
             .set_notifications(Some(notifications.notifications.clone()));
-        app.state.set_loading(false);
-
+        app.state.set_notification_cursors(page_cursors);
+        app.state.set_notifications_current_cursor_index(target);
         Ok(())
     }
 
     async fn do_search(&mut self, event: SearchEvent) -> Result<()> {
-        let current_cursor_index = {
+        let (current, cursors, existing_query) = {
             let app = self.app.lock().await;
-            app.state.get_search_current_cursor_index()
+            (
+                app.state.get_search_current_cursor_index(),
+                app.state.get_search_cursors(),
+                app.state.get_search_query(),
+            )
         };
-
-        if current_cursor_index == 0 && matches!(event, SearchEvent::Prev) {
+        let target = match &event {
+            SearchEvent::Load(_) => 0,
+            SearchEvent::Reload => current,
+            SearchEvent::Prev if current > 0 => current - 1,
+            SearchEvent::Prev => return Ok(()),
+            SearchEvent::Next => current + 1,
+        };
+        let cursor = if matches!(event, SearchEvent::Load(_)) {
+            None
+        } else {
+            cursors.get(target).cloned().flatten()
+        };
+        if matches!(event, SearchEvent::Next) && cursor.is_none() {
             return Ok(());
         }
-
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_loading(true);
-        }
-
-        let agent = {
-            let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
-        };
-
-        let cursor = match &event {
-            SearchEvent::Load(query) => {
-                let mut app = self.app.lock().await;
-                app.state.set_search_query(Some(query.clone()));
-                None
-            }
-            SearchEvent::Next => {
-                let app = self.app.lock().await;
-                app.state.get_search_next_cursor()
-            }
-            SearchEvent::Prev => {
-                let app = self.app.lock().await;
-                app.state.get_search_prev_cursor()
-            }
-            SearchEvent::Reload => {
-                let app = self.app.lock().await;
-                app.state.get_search_current_cursor()
-            }
-        };
-
-        let current_cursor_index = {
-            let app = self.app.lock().await;
-            app.state.get_search_current_cursor_index()
-        };
-
-        if matches!(event, SearchEvent::Prev) && current_cursor_index == 0 {
-            return Ok(());
-        }
-
-        let query_to_use = match &event {
+        let query = match &event {
             SearchEvent::Load(query) => query.clone(),
-            _ => {
-                let app = self.app.lock().await;
-                app.state.get_search_query().unwrap_or_default()
-            }
+            _ => existing_query.ok_or_else(|| eyre!("no search query is active"))?,
         };
 
-        {
-            let search_results = bsky::search(&agent, query_to_use, cursor).await?;
-            let image_urls = search_results
-                .posts
-                .iter()
-                .flat_map(|post| bsky::post_image_urls(post))
-                .collect::<Vec<_>>();
-            let mut app = self.app.lock().await;
-            app.state.set_search_results(Some(
-                search_results
-                    .posts
-                    .iter()
-                    .map(|post| post.data.clone())
-                    .collect(),
-            ));
-            app.queue_images(image_urls);
+        let results =
+            bsky::search(self.agent().await?.as_ref(), query.clone(), cursor.clone()).await?;
+        let image_urls = results
+            .posts
+            .iter()
+            .flat_map(|post| bsky::post_image_urls(post))
+            .collect::<Vec<_>>();
+        let page_cursors = updated_cursors(
+            if matches!(event, SearchEvent::Load(_)) {
+                vec![None]
+            } else {
+                cursors
+            },
+            target,
+            cursor,
+            results.cursor.clone(),
+        );
 
-            match &event {
-                SearchEvent::Load(_) => {
-                    let mut cursors = app.state.get_search_cursors().clone();
-                    cursors.push(search_results.cursor.clone());
-                    app.state.set_search_cursors(cursors);
-                }
-                SearchEvent::Next => {
-                    let mut cursors = app.state.get_search_cursors().clone();
-                    cursors.push(search_results.cursor.clone());
-                    app.state.set_search_cursors(cursors);
-                    app.state
-                        .set_search_current_cursor_index(current_cursor_index + 1);
-                }
-                SearchEvent::Prev => {
-                    if current_cursor_index == 0 {
-                        return Ok(());
-                    }
-                    app.state
-                        .set_search_current_cursor_index(current_cursor_index - 1);
-                }
-                _ => (),
-            }
-
-            app.state.set_tab(Tab::Search);
-            app.state.move_search_scroll_top();
-        }
-
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_loading(false);
-        }
-
+        let mut app = self.app.lock().await;
+        app.state.set_search_query(Some(query));
+        app.state.set_search_results(Some(
+            results.posts.iter().map(|post| post.data.clone()).collect(),
+        ));
+        app.state.set_search_cursors(page_cursors);
+        app.state.set_search_current_cursor_index(target);
+        app.state.set_tab(Tab::Search);
+        app.state.move_search_scroll_top();
+        app.queue_images(image_urls);
         Ok(())
     }
 
     async fn do_like(&mut self) -> Result<()> {
-        let agent = {
+        let (did, feed) = {
             let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
+            (
+                app.state.get_did(),
+                app.state
+                    .get_current_feed()
+                    .ok_or_else(|| eyre!("no timeline post is selected"))?,
+            )
         };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
-        };
-        let current_feed = {
-            let app = self.app.lock().await;
-            app.state.get_current_feed().unwrap()
-        };
-
-        bsky::toggle_like(&agent, did, current_feed).await?;
-        self.do_load_timeline(TimelineEvent::Reload).await?;
-
-        Ok(())
+        bsky::toggle_like(self.agent().await?.as_ref(), did, feed).await?;
+        self.do_load_timeline(TimelineEvent::Reload).await
     }
 
     async fn do_repost(&mut self) -> Result<()> {
-        let agent = {
+        let (did, feed) = {
             let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
+            (
+                app.state.get_did(),
+                app.state
+                    .get_current_feed()
+                    .ok_or_else(|| eyre!("no timeline post is selected"))?,
+            )
         };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
-        };
-        let current_feed = {
-            let app = self.app.lock().await;
-            app.state.get_current_feed().unwrap()
-        };
-
-        bsky::toggle_repost(&agent, did, current_feed).await?;
-        self.do_load_timeline(TimelineEvent::Reload).await?;
-
-        Ok(())
+        bsky::toggle_repost(self.agent().await?.as_ref(), did, feed).await?;
+        self.do_load_timeline(TimelineEvent::Reload).await
     }
 
     async fn do_reply(&mut self) -> Result<()> {
-        let agent = {
+        let (did, feed, text) = {
             let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
+            (
+                app.state.get_did(),
+                app.state
+                    .get_current_feed()
+                    .ok_or_else(|| eyre!("no timeline post is selected"))?,
+                app.state.get_input().value().to_string(),
+            )
         };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
+        bsky::validate_post_text(&text)?;
+        let parent = strong_ref::MainData {
+            cid: feed.post.cid.clone(),
+            uri: feed.post.uri.clone(),
         };
-        let current_feed = {
-            let app = self.app.lock().await;
-            app.state.get_current_feed().unwrap()
-        };
-        let text = {
-            let app = self.app.lock().await;
-            app.state.get_input().value().to_string()
-        };
-        let reply = ReplyRefData {
-            root: strong_ref::MainData {
-                cid: current_feed.post.cid.clone(),
-                uri: current_feed.post.uri.clone(),
-            }
-            .into(),
-            parent: strong_ref::MainData {
-                cid: current_feed.post.cid.clone(),
-                uri: current_feed.post.uri.clone(),
-            }
-            .into(),
-        };
-
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_mode(Mode::Normal);
-            app.state.set_input(Input::default());
-        }
-
-        bsky::send_post(&agent, did, text, Some(reply.into())).await?;
-        self.do_load_timeline(TimelineEvent::Load).await?;
-
-        Ok(())
+        let root = bsky::reply_root(&feed).unwrap_or_else(|| parent.clone());
+        bsky::send_post(
+            self.agent().await?.as_ref(),
+            did,
+            text,
+            Some(
+                ReplyRefData {
+                    root: root.into(),
+                    parent: parent.into(),
+                }
+                .into(),
+            ),
+        )
+        .await?;
+        self.finish_composer().await;
+        self.do_load_timeline(TimelineEvent::Reload).await
     }
 
     async fn do_search_like(&mut self) -> Result<()> {
-        let agent = {
-            let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
-        };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
-        };
-        let current_post = {
-            let app = self.app.lock().await;
-            app.state.get_current_search_result().unwrap()
-        };
-
-        bsky::toggle_like_post_view(&agent, did, current_post).await?;
-        self.do_search(SearchEvent::Reload).await?;
-
-        Ok(())
+        let (did, post) = self.selected_search_post().await?;
+        bsky::toggle_like_post_view(self.agent().await?.as_ref(), did, post).await?;
+        self.do_search(SearchEvent::Reload).await
     }
 
     async fn do_search_repost(&mut self) -> Result<()> {
-        let agent = {
-            let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
-        };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
-        };
-        let current_post = {
-            let app = self.app.lock().await;
-            app.state.get_current_search_result().unwrap()
-        };
+        let (did, post) = self.selected_search_post().await?;
+        bsky::toggle_repost_post_view(self.agent().await?.as_ref(), did, post).await?;
+        self.do_search(SearchEvent::Reload).await
+    }
 
-        bsky::toggle_repost_post_view(&agent, did, current_post).await?;
-        self.do_search(SearchEvent::Reload).await?;
-
-        Ok(())
+    async fn selected_search_post(
+        &self,
+    ) -> Result<(
+        atrium_api::types::string::Did,
+        atrium_api::app::bsky::feed::defs::PostViewData,
+    )> {
+        let app = self.app.lock().await;
+        Ok((
+            app.state.get_did(),
+            app.state
+                .get_current_search_result()
+                .ok_or_else(|| eyre!("no search result is selected"))?,
+        ))
     }
 
     async fn do_search_reply(&mut self) -> Result<()> {
-        let agent = {
-            let app = self.app.lock().await;
-            app.state.get_agent().unwrap()
+        let (did, post) = self.selected_search_post().await?;
+        let text = self.app.lock().await.state.get_input().value().to_string();
+        bsky::validate_post_text(&text)?;
+        let subject = strong_ref::MainData {
+            cid: post.cid.clone(),
+            uri: post.uri.clone(),
         };
-        let did = {
-            let app = self.app.lock().await;
-            app.state.get_did()
-        };
-        let current_post = {
-            let app = self.app.lock().await;
-            app.state.get_current_search_result().unwrap()
-        };
-        let text = {
-            let app = self.app.lock().await;
-            app.state.get_input().value().to_string()
-        };
-        let reply = ReplyRefData {
-            root: strong_ref::MainData {
-                cid: current_post.cid.clone(),
-                uri: current_post.uri.clone(),
-            }
-            .into(),
-            parent: strong_ref::MainData {
-                cid: current_post.cid.clone(),
-                uri: current_post.uri.clone(),
-            }
-            .into(),
-        };
+        let root = bsky::reply_root_for_post(self.agent().await?.as_ref(), &post).await?;
+        bsky::send_post(
+            self.agent().await?.as_ref(),
+            did,
+            text,
+            Some(
+                ReplyRefData {
+                    root: root.into(),
+                    parent: subject.into(),
+                }
+                .into(),
+            ),
+        )
+        .await?;
+        self.finish_composer().await;
+        self.do_search(SearchEvent::Reload).await
+    }
 
-        {
-            let mut app = self.app.lock().await;
-            app.state.set_mode(Mode::Normal);
-            app.state.set_input(Input::default());
-        }
+    async fn finish_composer(&self) {
+        let mut app = self.app.lock().await;
+        app.state.set_mode(Mode::Normal);
+        app.state.set_input(Input::default());
+    }
+}
 
-        bsky::send_post(&agent, did, text, Some(reply.into())).await?;
-        self.do_search(SearchEvent::Reload).await?;
+fn updated_cursors(
+    mut cursors: Vec<Option<String>>,
+    target: usize,
+    current: Option<String>,
+    next: Option<String>,
+) -> Vec<Option<String>> {
+    cursors.resize(target + 1, None);
+    cursors[target] = current;
+    cursors.truncate(target + 1);
+    cursors.push(next);
+    cursors
+}
 
-        Ok(())
+fn operation_name(event: &IoEvent) -> &'static str {
+    match event {
+        IoEvent::Initialize => "Initialization",
+        IoEvent::LoadTimeline(_) => "Timeline request",
+        IoEvent::LoadNotifications(_) => "Notification request",
+        IoEvent::SendPost => "Post",
+        IoEvent::Like | IoEvent::SearchLike => "Like",
+        IoEvent::Repost | IoEvent::SearchRepost => "Repost",
+        IoEvent::Reply | IoEvent::SearchReply => "Reply",
+        IoEvent::Search(_) => "Search",
+    }
+}
+
+fn user_error(operation: &str, error: &eyre::Report) -> String {
+    let detail = format!("{error:#}");
+    let lower = detail.to_ascii_lowercase();
+    let category = if lower.contains("429") || lower.contains("rate limit") {
+        "Rate limit exceeded"
+    } else if lower.contains("401")
+        || lower.contains("unauthorized")
+        || lower.contains("authentication")
+        || lower.contains("invalid identifier or password")
+    {
+        "Authentication failed"
+    } else if lower.contains("timeout")
+        || lower.contains("connect")
+        || lower.contains("dns")
+        || lower.contains("network")
+    {
+        "Network request failed"
+    } else {
+        "Operation failed"
+    };
+    format!("{operation}: {category}. {detail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_history_is_replaced_after_reload() {
+        let cursors = vec![None, Some("page-2".into()), Some("stale".into())];
+        let updated = updated_cursors(cursors, 1, Some("page-2".into()), Some("fresh".into()));
+        assert_eq!(
+            updated,
+            vec![None, Some("page-2".into()), Some("fresh".into())]
+        );
     }
 }

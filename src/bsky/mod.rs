@@ -1,10 +1,13 @@
-use eyre::Result;
+use std::convert::TryInto;
+
+use eyre::{bail, Result};
+use unicode_segmentation::UnicodeSegmentation;
 
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
         embed::record_with_media::ViewMediaRefs,
-        feed::{defs, get_timeline, post, search_posts},
+        feed::{defs, get_post_thread, get_timeline, post, search_posts},
         notification,
     },
     com::atproto::{repo, server},
@@ -20,20 +23,82 @@ use bsky_sdk::BskyAgent;
 
 pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
 
-pub async fn session(
-    agent: &BskyAgent,
+pub async fn agent_with_session(
+    service_url: String,
     email: String,
     password: String,
-) -> Result<server::create_session::Output> {
+) -> Result<(BskyAgent, server::create_session::Output)> {
+    let config = bsky_sdk::agent::config::Config {
+        endpoint: service_url,
+        ..Default::default()
+    };
+    let agent = BskyAgent::builder().config(config).build().await?;
     let session = agent.login(email, password).await?;
-    Ok(session)
+    Ok((agent, session))
 }
 
-pub async fn agent_with_session(email: String, password: String) -> Result<BskyAgent> {
-    let agent = BskyAgent::builder().build().await?;
-    let session = agent.login(email, password).await?;
-    agent.resume_session(session).await?;
-    Ok(agent)
+pub fn validate_post_text(text: &str) -> Result<()> {
+    if text.trim().is_empty() {
+        bail!("post text cannot be empty");
+    }
+    let graphemes = text.graphemes(true).count();
+    if graphemes > 300 {
+        bail!("post is {graphemes} graphemes; the limit is 300");
+    }
+    if text.len() > 3000 {
+        bail!("post is {} bytes; the limit is 3000", text.len());
+    }
+    Ok(())
+}
+
+pub fn reply_root(feed: &defs::FeedViewPost) -> Option<repo::strong_ref::MainData> {
+    let reply = feed.reply.as_ref()?;
+    let Union::Refs(defs::ReplyRefRootRefs::PostView(root)) = &reply.root else {
+        return None;
+    };
+    Some(repo::strong_ref::MainData {
+        cid: root.cid.clone(),
+        uri: root.uri.clone(),
+    })
+}
+
+pub async fn reply_root_for_post(
+    agent: &BskyAgent,
+    post: &defs::PostViewData,
+) -> Result<repo::strong_ref::MainData> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_post_thread(
+            get_post_thread::ParametersData {
+                depth: Some(0_u16.try_into().map_err(eyre::Report::msg)?),
+                parent_height: Some(1000_u16.try_into().map_err(eyre::Report::msg)?),
+                uri: post.uri.clone(),
+            }
+            .into(),
+        )
+        .await?;
+    let Union::Refs(get_post_thread::OutputThreadRefs::AppBskyFeedDefsThreadViewPost(thread)) =
+        &output.thread
+    else {
+        bail!("the reply target is unavailable");
+    };
+    let root = root_thread_post(thread);
+    Ok(repo::strong_ref::MainData {
+        cid: root.cid.clone(),
+        uri: root.uri.clone(),
+    })
+}
+
+fn root_thread_post(thread: &defs::ThreadViewPost) -> &defs::PostView {
+    match thread.parent.as_ref() {
+        Some(Union::Refs(defs::ThreadViewPostParentRefs::ThreadViewPost(parent))) => {
+            root_thread_post(parent)
+        }
+        _ => &thread.post,
+    }
 }
 
 pub async fn timeline(agent: &BskyAgent, cursor: Option<String>) -> Result<get_timeline::Output> {
@@ -133,12 +198,13 @@ pub async fn send_post(
     text: String,
     reply: Option<post::ReplyRef>,
 ) -> Result<()> {
+    let rich_text = bsky_sdk::rich_text::RichText::new_with_detect_facets(&text).await?;
     agent
         .create_record(post::RecordData {
             created_at: Datetime::now(),
             embed: None,
             entities: None,
-            facets: None,
+            facets: rich_text.facets,
             langs: None,
             labels: None,
             tags: None,
@@ -150,7 +216,10 @@ pub async fn send_post(
     Ok(())
 }
 
-pub async fn notifications(agent: &BskyAgent) -> Result<notification::list_notifications::Output> {
+pub async fn notifications(
+    agent: &BskyAgent,
+    cursor: Option<String>,
+) -> Result<notification::list_notifications::Output> {
     let notifications = agent
         .api
         .app
@@ -158,7 +227,7 @@ pub async fn notifications(agent: &BskyAgent) -> Result<notification::list_notif
         .notification
         .list_notifications(
             notification::list_notifications::ParametersData {
-                cursor: None,
+                cursor,
                 limit: None,
                 priority: None,
                 reasons: None,
@@ -169,6 +238,22 @@ pub async fn notifications(agent: &BskyAgent) -> Result<notification::list_notif
         .await?;
 
     Ok(notifications)
+}
+
+pub async fn update_seen(agent: &BskyAgent) -> Result<()> {
+    agent
+        .api
+        .app
+        .bsky
+        .notification
+        .update_seen(
+            notification::update_seen::InputData {
+                seen_at: Datetime::now(),
+            }
+            .into(),
+        )
+        .await?;
+    Ok(())
 }
 
 pub async fn likes(agent: &BskyAgent, did: String) -> Result<repo::list_records::Output> {
@@ -214,12 +299,16 @@ pub async fn reposts(agent: &BskyAgent, did: String) -> Result<repo::list_record
 }
 
 pub async fn toggle_like(agent: &BskyAgent, did: Did, feed: defs::FeedViewPost) -> Result<()> {
-    if let Some(viewer) = &feed.post.viewer {
-        if let Some(like) = &viewer.like {
-            unlike(agent, did, uri_to_rkey(like.clone()).unwrap()).await?;
-        } else {
-            like(agent, did, feed.post.cid.clone(), feed.post.uri.clone()).await?;
-        }
+    if let Some(like_uri) = feed
+        .post
+        .viewer
+        .as_ref()
+        .and_then(|viewer| viewer.like.as_ref())
+    {
+        let rkey = uri_to_rkey(like_uri.clone()).ok_or_else(|| eyre::eyre!("invalid Like URI"))?;
+        unlike(agent, did, rkey).await?;
+    } else {
+        like(agent, did, feed.post.cid.clone(), feed.post.uri.clone()).await?;
     }
 
     Ok(())
@@ -306,12 +395,17 @@ pub async fn unrepost(agent: &BskyAgent, did: Did, rkey: String) -> Result<()> {
 }
 
 pub async fn toggle_repost(agent: &BskyAgent, did: Did, feed: defs::FeedViewPost) -> Result<()> {
-    if let Some(viewer) = &feed.post.viewer {
-        if let Some(repost) = &viewer.repost {
-            unrepost(agent, did, uri_to_rkey(repost.clone()).unwrap()).await?;
-        } else {
-            repost(agent, did, feed.post.cid.clone(), feed.post.uri.clone()).await?;
-        }
+    if let Some(repost_uri) = feed
+        .post
+        .viewer
+        .as_ref()
+        .and_then(|viewer| viewer.repost.as_ref())
+    {
+        let rkey =
+            uri_to_rkey(repost_uri.clone()).ok_or_else(|| eyre::eyre!("invalid Repost URI"))?;
+        unrepost(agent, did, rkey).await?;
+    } else {
+        repost(agent, did, feed.post.cid.clone(), feed.post.uri.clone()).await?;
     }
 
     Ok(())
@@ -335,12 +429,11 @@ pub async fn toggle_like_post_view(
     did: Did,
     post: defs::PostViewData,
 ) -> Result<()> {
-    if let Some(viewer) = &post.viewer {
-        if let Some(like) = &viewer.like {
-            unlike(agent, did, uri_to_rkey(like.clone()).unwrap()).await?;
-        } else {
-            like(agent, did, post.cid.clone(), post.uri.clone()).await?;
-        }
+    if let Some(like_uri) = post.viewer.as_ref().and_then(|viewer| viewer.like.as_ref()) {
+        let rkey = uri_to_rkey(like_uri.clone()).ok_or_else(|| eyre::eyre!("invalid Like URI"))?;
+        unlike(agent, did, rkey).await?;
+    } else {
+        like(agent, did, post.cid.clone(), post.uri.clone()).await?;
     }
 
     Ok(())
@@ -351,12 +444,16 @@ pub async fn toggle_repost_post_view(
     did: Did,
     post: defs::PostViewData,
 ) -> Result<()> {
-    if let Some(viewer) = &post.viewer {
-        if let Some(repost) = &viewer.repost {
-            unrepost(agent, did, uri_to_rkey(repost.clone()).unwrap()).await?;
-        } else {
-            repost(agent, did, post.cid.clone(), post.uri.clone()).await?;
-        }
+    if let Some(repost_uri) = post
+        .viewer
+        .as_ref()
+        .and_then(|viewer| viewer.repost.as_ref())
+    {
+        let rkey =
+            uri_to_rkey(repost_uri.clone()).ok_or_else(|| eyre::eyre!("invalid Repost URI"))?;
+        unrepost(agent, did, rkey).await?;
+    } else {
+        repost(agent, did, post.cid.clone(), post.uri.clone()).await?;
     }
 
     Ok(())

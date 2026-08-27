@@ -5,12 +5,26 @@ use eyre::Result;
 use serde::{Deserialize, Serialize};
 use toml;
 
-#[derive(Default, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     pub email: String,
     pub password: String,
+    #[serde(default = "default_service_url")]
+    pub service_url: String,
     pub skip_splash: bool,
     pub splash_path: Option<String>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            email: String::new(),
+            password: String::new(),
+            service_url: default_service_url(),
+            skip_splash: false,
+            splash_path: None,
+        }
+    }
 }
 
 impl AppConfig {
@@ -23,6 +37,7 @@ impl AppConfig {
         Self {
             email,
             password,
+            service_url: default_service_url(),
             skip_splash,
             splash_path,
         }
@@ -39,6 +54,9 @@ impl AppConfig {
         }
         if self.password.is_empty() {
             eyre::bail!("password is required");
+        }
+        if self.service_url.trim().is_empty() {
+            eyre::bail!("service_url is required");
         }
         Ok(())
     }
@@ -57,8 +75,24 @@ impl AppConfig {
         let prefix = path.parent().unwrap();
         std::fs::create_dir_all(prefix)?;
 
-        let content = toml::to_string(&Self::default())?;
-        let mut file = std::fs::File::create(&path)?;
+        let content = format!(
+            "# Use a Bluesky App Password here, not your account password.\n{}",
+            toml::to_string(&Self::default())?
+        );
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)?
+        };
+        #[cfg(not(unix))]
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
         file.write_all(content.as_bytes())?;
 
         Ok(())
@@ -69,6 +103,7 @@ impl AppConfig {
         let config = Config::builder()
             .set_default("skip_splash", false)?
             .set_default("splash_path", None::<String>)?
+            .set_default("service_url", default_service_url())?
             .add_source(
                 config::File::from(path)
                     .required(true)
@@ -77,4 +112,8 @@ impl AppConfig {
             .build()?;
         Ok(config)
     }
+}
+
+fn default_service_url() -> String {
+    "https://bsky.social".to_string()
 }

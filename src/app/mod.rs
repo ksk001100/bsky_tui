@@ -13,7 +13,7 @@ use crate::{
     app::{config::AppConfig, state::Tab},
     bsky,
     inputs::key::Key,
-    io::{IoEvent, SearchEvent, TimelineEvent},
+    io::{IoEvent, NotificationEvent, SearchEvent, TimelineEvent},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -48,6 +48,7 @@ impl ImageViewer {
 pub struct App {
     io_tx: tokio::sync::mpsc::Sender<IoEvent>,
     is_loading: bool,
+    error: Option<String>,
     pub state: AppState,
     images: ImageCache,
     image_viewer: Option<ImageViewer>,
@@ -61,6 +62,7 @@ impl App {
         Self {
             io_tx,
             is_loading,
+            error: None,
             state,
             images: ImageCache::new(),
             image_viewer: None,
@@ -68,6 +70,25 @@ impl App {
     }
 
     pub async fn do_action(&mut self, key: Key) -> AppReturn {
+        if self.is_loading {
+            return match key {
+                Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
+                _ => AppReturn::Continue,
+            };
+        }
+
+        if !self.state.is_initialized() {
+            return match key {
+                Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
+                Key::Char('r') => {
+                    self.error = None;
+                    self.dispatch(IoEvent::Initialize).await;
+                    AppReturn::Continue
+                }
+                _ => AppReturn::Continue,
+            };
+        }
+
         if self.image_viewer.is_some() {
             return self.image_viewer_action(key);
         }
@@ -154,7 +175,8 @@ impl App {
                             .await;
                     }
                     Tab::Notifications => {
-                        self.dispatch(IoEvent::LoadNotifications).await;
+                        self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
+                            .await;
                     }
                     Tab::Search => {}
                 }
@@ -178,7 +200,8 @@ impl App {
         match key {
             Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
             Key::Char('r') => {
-                self.dispatch(IoEvent::LoadNotifications).await;
+                self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Reload))
+                    .await;
                 AppReturn::Continue
             }
             Key::Char('?') => {
@@ -206,10 +229,21 @@ impl App {
                             .await;
                     }
                     Tab::Notifications => {
-                        self.dispatch(IoEvent::LoadNotifications).await;
+                        self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
+                            .await;
                     }
                     Tab::Search => {}
                 }
+                AppReturn::Continue
+            }
+            Key::Char('h') | Key::Left => {
+                self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Prev))
+                    .await;
+                AppReturn::Continue
+            }
+            Key::Char('l') | Key::Right => {
+                self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Next))
+                    .await;
                 AppReturn::Continue
             }
             _ => AppReturn::Continue,
@@ -281,7 +315,8 @@ impl App {
                             .await;
                     }
                     Tab::Notifications => {
-                        self.dispatch(IoEvent::LoadNotifications).await;
+                        self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
+                            .await;
                     }
                     Tab::Search => {}
                 }
@@ -371,8 +406,12 @@ impl App {
                 self.state.set_input(Input::default());
                 AppReturn::Continue
             }
-            Key::Enter => {
+            Key::Ctrl('s') => {
                 self.dispatch(IoEvent::SendPost).await;
+                AppReturn::Continue
+            }
+            Key::Enter => {
+                self.state.insert_input(InputRequest::InsertChar('\n'));
                 AppReturn::Continue
             }
             Key::Left | Key::Ctrl('b') => {
@@ -410,12 +449,16 @@ impl App {
                 self.state.set_input(Input::default());
                 AppReturn::Continue
             }
-            Key::Enter => {
-                if self.state.get_current_search_result().is_some() {
+            Key::Ctrl('s') => {
+                if self.state.get_tab() == Tab::Search {
                     self.dispatch(IoEvent::SearchReply).await;
                 } else {
                     self.dispatch(IoEvent::Reply).await;
                 }
+                AppReturn::Continue
+            }
+            Key::Enter => {
+                self.state.insert_input(InputRequest::InsertChar('\n'));
                 AppReturn::Continue
             }
             Key::Left | Key::Ctrl('b') => {
@@ -520,9 +563,13 @@ impl App {
     }
 
     pub async fn dispatch(&mut self, action: IoEvent) {
+        if self.is_loading {
+            return;
+        }
         self.is_loading = true;
         if self.io_tx.send(action).await.is_err() {
             self.is_loading = false;
+            self.error = Some("Internal error: background worker is unavailable".to_string());
         };
     }
 
@@ -530,8 +577,41 @@ impl App {
         &self.state
     }
 
+    pub fn input_cursor_position(&self) -> (u16, u16) {
+        use unicode_width::UnicodeWidthStr;
+
+        let input = self.state.get_input();
+        let before_cursor = input
+            .value()
+            .chars()
+            .take(input.cursor())
+            .collect::<String>();
+        let row = before_cursor
+            .chars()
+            .filter(|character| *character == '\n')
+            .count();
+        let column = before_cursor
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .width();
+        (column as u16, row as u16)
+    }
+
     pub fn is_loading(&self) -> bool {
         self.is_loading
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub fn set_error(&mut self, error: String) {
+        self.error = Some(error);
+    }
+
+    pub fn clear_error(&mut self) {
+        self.error = None;
     }
 
     pub fn initialized(&mut self, agent: BskyAgent, handle: Handle, did: Did, config: AppConfig) {

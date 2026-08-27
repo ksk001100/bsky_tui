@@ -50,11 +50,16 @@ This will generate a configuration file at:
 Edit the generated configuration file and set the following required fields:
 
 ```toml
-email = "your.email@example.com"  # Your Bluesky account email
-password = "your_password"        # Your Bluesky account password
+email = "your.email@example.com"  # Your Bluesky account email or handle
+password = "xxxx-xxxx-xxxx-xxxx"  # A Bluesky App Password (not your account password)
+service_url = "https://bsky.social" # Your PDS/service URL
 skip_splash = false               # Whether to skip the splash screen (optional)
 splash_path = ""                  # Path to a custom splash screen (optional)
 ```
+
+Create an App Password in Bluesky under **Settings → Privacy and security → App passwords**.
+Using an App Password limits the impact if this local configuration is exposed. On Unix,
+new configuration files are created with owner-only (`0600`) permissions.
 
 ## Usage
 
@@ -98,6 +103,8 @@ text-cell rendering mode.
 - `j`, `Down`, `Ctrl+n`: Scroll down
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `r`: Reload notifications
+- `h`, `Left`: Previous page
+- `l`, `Right`: Next page
 - `/`: Switch to search mode
 
 ### Search Tab
@@ -120,7 +127,8 @@ text-cell rendering mode.
 
 ### Post/Reply Mode
 - `Esc`: Cancel
-- `Enter`: Send post/reply
+- `Enter`: Insert a newline
+- `Ctrl+s`: Send post/reply
 - `Left`, `Ctrl+b`: Move cursor left
 - `Right`, `Ctrl+f`: Move cursor right
 - `Ctrl+a`: Move cursor to start

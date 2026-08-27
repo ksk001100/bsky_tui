@@ -1,4 +1,4 @@
-use atrium_api::app::bsky::feed::{defs::PostViewData, post, repost};
+use atrium_api::app::bsky::feed::{defs::PostViewData, like, post, repost};
 use bsky_sdk::api::types::TryFromUnknown;
 use chrono::{DateTime, Utc};
 use ratatui::{
@@ -9,6 +9,7 @@ use ratatui::{
         Block, BorderType, Borders, Cell, List, ListItem, Padding, Paragraph, Row, Table, Tabs,
     },
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 use crate::{
@@ -49,6 +50,21 @@ pub fn loading<'a>() -> Paragraph<'a> {
                 .add_modifier(Modifier::BOLD),
         )
         .alignment(Alignment::Center)
+}
+
+pub fn error<'a>(message: &str) -> Paragraph<'a> {
+    Paragraph::new(format!(
+        "{message}\n\nRetry the action, or press q/Esc to quit."
+    ))
+    .style(Style::default().fg(Color::LightRed).bg(Color::Black))
+    .alignment(Alignment::Left)
+    .wrap(ratatui::widgets::Wrap { trim: true })
+    .block(
+        Block::default()
+            .title("Error")
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
 }
 
 pub fn help<'a>() -> Table<'a> {
@@ -189,8 +205,8 @@ pub fn help<'a>() -> Table<'a> {
         Row::new(vec![
             Cell::from(""),
             Cell::from(""),
-            Cell::from("Enter"),
-            Cell::from("Send post/reply/search"),
+            Cell::from("Ctrl+s / Enter"),
+            Cell::from("Send post/reply / insert newline"),
         ]),
         Row::new(vec![
             Cell::from(""),
@@ -542,11 +558,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     .clone()
                     .unwrap_or_else(|| "".into());
                 let reason = notification.reason.as_str();
-                let datetime = format!(
-                    "{:?}+0000",
-                    // notification.indexed_at.clone().rsplit('.').last().unwrap()
-                    notification.indexed_at
-                );
+                let datetime = notification.indexed_at.as_str();
                 let reason_icon = match reason {
                     "reply" => Span::styled("↩", Style::default().fg(Color::Gray)),
                     "repost" => Span::styled("🔁", Style::default().fg(Color::Green)),
@@ -557,8 +569,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     _ => Span::from(""),
                 };
 
-                let duration_text = match DateTime::parse_from_str(&datetime, "%Y-%m-%dT%H:%M:%S%z")
-                {
+                let duration_text = match DateTime::parse_from_rfc3339(datetime) {
                     Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
                     Err(_) => "".into(),
                 };
@@ -572,7 +583,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                             None
                         }
                     }
-                    "like" | "repost" => {
+                    "repost" => {
                         if let Ok(r) = repost::Record::try_from_unknown(notification.record.clone())
                         {
                             bsky::get_url(my_handle.clone(), r.subject.uri.clone())
@@ -580,6 +591,9 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                             None
                         }
                     }
+                    "like" => like::Record::try_from_unknown(notification.record.clone())
+                        .ok()
+                        .and_then(|r| bsky::get_url(my_handle.clone(), r.subject.uri.clone())),
                     _ => None,
                 };
 
@@ -647,7 +661,8 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                 .style(Style::default())
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
-                    "Notifications ({})",
+                    "Notifications (page {}, {} items)",
+                    state.get_notifications_current_cursor_index() + 1,
                     state.get_notifications().unwrap_or_default().len()
                 ))
                 .border_type(BorderType::Plain),
@@ -656,6 +671,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
 
 pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
+    let remaining = 300_i64 - text.graphemes(true).count() as i64;
     Paragraph::new(text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Left)
@@ -663,7 +679,7 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
             Block::default()
                 .style(Style::default().fg(Color::White))
                 .borders(Borders::ALL)
-                .title("New post")
+                .title(format!("New post — {remaining} remaining (Ctrl+s to send)"))
                 .padding(Padding::new(1, 1, 1, 1)),
         )
 }
@@ -684,6 +700,7 @@ pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
 
 pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
+    let remaining = 300_i64 - text.graphemes(true).count() as i64;
 
     if state.get_tab() == Tab::Search {
         if let Some(search_result) = state.get_current_search_result() {
@@ -729,7 +746,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
                 Block::default()
                     .style(Style::default().fg(Color::White))
                     .borders(Borders::ALL)
-                    .title("Reply")
+                    .title(format!("Reply — {remaining} remaining (Ctrl+s to send)"))
                     .padding(Padding::new(1, 1, 1, 1)),
             );
         }
@@ -785,7 +802,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         Block::default()
             .style(Style::default().fg(Color::White))
             .borders(Borders::ALL)
-            .title("Reply")
+            .title(format!("Reply — {remaining} remaining (Ctrl+s to send)"))
             .padding(Padding::new(1, 1, 1, 1)),
     )
 }

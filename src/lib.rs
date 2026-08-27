@@ -72,9 +72,15 @@ async fn run_ui(
 
             loop {
                 let app = app.lock().await;
-                if app.state.get_timeline().is_some() {
+                if app.state.get_timeline().is_some() || app.error().is_some() {
                     break;
                 }
+                drop(app);
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+
+            if app.lock().await.error().is_some() {
+                break;
             }
 
             tokio::time::sleep(Duration::from_millis(50)).await;

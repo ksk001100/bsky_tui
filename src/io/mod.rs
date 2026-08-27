@@ -4,7 +4,7 @@ pub mod handler;
 pub enum IoEvent {
     Initialize,
     LoadTimeline(TimelineEvent),
-    LoadNotifications,
+    LoadNotifications(NotificationEvent),
     SendPost,
     Like,
     Repost,
@@ -13,6 +13,14 @@ pub enum IoEvent {
     SearchLike,
     SearchRepost,
     SearchReply,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum NotificationEvent {
+    Load,
+    Next,
+    Prev,
+    Reload,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

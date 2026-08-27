@@ -56,7 +56,7 @@ pub fn input_popup(rect: Rect) -> Rect {
         .constraints(
             [
                 Constraint::Percentage(50),
-                Constraint::Length(5),
+                Constraint::Length(10),
                 Constraint::Percentage(50),
             ]
             .as_ref(),
@@ -82,7 +82,7 @@ pub fn reply_popup(rect: Rect) -> Rect {
         .constraints(
             [
                 Constraint::Percentage(50),
-                Constraint::Length(10),
+                Constraint::Length(15),
                 Constraint::Percentage(50),
             ]
             .as_ref(),

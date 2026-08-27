@@ -30,7 +30,7 @@ where
     let tabs = draw::tabs(app.state());
     f.render_widget(tabs, body_chunks[0]);
 
-    if app.state.is_loading() {
+    if app.is_loading() {
         let popup = draw::loading();
         let area = layout::popup(60, 20, size);
         f.render_widget(Clear, area);
@@ -77,10 +77,8 @@ where
         let area = layout::input_popup(size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
-        f.set_cursor_position(Position::new(
-            area.x + 2 + app.state.get_input().visual_cursor() as u16,
-            area.y + 2,
-        ));
+        let (column, row) = app.input_cursor_position();
+        f.set_cursor_position(Position::new(area.x + 2 + column, area.y + 2 + row));
     }
 
     if app.state.is_reply_mode() {
@@ -88,10 +86,8 @@ where
         let area = layout::reply_popup(size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
-        f.set_cursor_position(Position::new(
-            area.x + 2 + app.state.get_input().visual_cursor() as u16,
-            area.y + 6,
-        ));
+        let (column, row) = app.input_cursor_position();
+        f.set_cursor_position(Position::new(area.x + 2 + column, area.y + 6 + row));
     }
 
     if app.state.is_search_mode() {
@@ -107,6 +103,13 @@ where
 
     if let Some((url, index, total)) = app.current_image_viewer() {
         render_image_viewer(f, app, &url, index, total, size);
+    }
+
+    if let Some(message) = app.error() {
+        let popup = draw::error(message);
+        let area = layout::popup(70, 30, size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
     }
 }
 
