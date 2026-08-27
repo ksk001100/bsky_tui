@@ -17,6 +17,11 @@ use crate::{
     bsky, utils,
 };
 
+const FOCUSED_POST_STYLE: Style = Style::new()
+    .fg(Color::Black)
+    .bg(Color::LightCyan)
+    .add_modifier(Modifier::BOLD);
+
 pub fn title<'a>() -> Paragraph<'a> {
     Paragraph::new(format!(
         "{} {}",
@@ -332,16 +337,14 @@ fn post_list(posts: Vec<PostViewData>, width: u16, title: String) -> PostList<'s
         .collect::<Vec<_>>();
 
     PostList {
-        widget: List::new(items)
-            .highlight_style(Style::default().bg(Color::Blue))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(Style::default())
-                    .padding(Padding::new(1, 1, 1, 1))
-                    .title(title)
-                    .border_type(BorderType::Plain),
-            ),
+        widget: List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .style(Style::default())
+                .padding(Padding::new(1, 1, 1, 1))
+                .title(title)
+                .border_type(BorderType::Plain),
+        ),
         layouts,
     }
 }
@@ -654,7 +657,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
     };
 
     List::new(list_items)
-        .highlight_style(Style::default().bg(Color::Blue))
+        .highlight_style(FOCUSED_POST_STYLE)
         .block(
             Block::default()
                 .borders(Borders::ALL)
