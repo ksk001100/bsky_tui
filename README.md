@@ -113,11 +113,13 @@ text-cell rendering mode.
 ## Keybindings
 
 ### Common
-- `q`, `Esc`, `Ctrl+c`: Exit
+- `Esc`: Cancel, close, or go back (it does not quit from a main tab)
+- `q`: Exit from any browsing screen
+- `Ctrl+c`: Exit immediately
 - `Tab`: Switch tabs (Home → Notifications → Search → Home)
-- `?`: Show help
+- `?`, `F1`: Show help (also available in threads and profiles)
 - `u`: Search for users
-- `p`: Open the selected post author profile (where available)
+- `a`: Open the selected post author profile (where available)
 - `m`, `B`, `!`: Mute/unmute, block/unblock, or report (with confirmation)
 - `D`: Delete the selected post when it belongs to you (with confirmation)
 - `X`: Quote the selected post
@@ -127,15 +129,17 @@ text-cell rendering mode.
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
-- `r`: Reload timeline
+- `[`, `PageUp`: Previous page
+- `]`, `PageDown`: Next page
+- `F5`: Reload timeline
 - `c`: Open the feed selector
 - `n`: New post
-- `N`: Reply to selected post
+- `r`: Reply to selected post
 - `Ctrl+l`: Like/unlike
 - `Ctrl+r`: Repost/unrepost
-- `Enter`: Open attached images
-- `b`: Open selected post in browser
-- `t`: Open selected post thread
+- `Enter`: Open selected post thread
+- `i`, `Space`: Open attached images
+- `o`: Open selected post in browser
 - `e`: Open an external link or video embed
 - `f`: Select a URL, mention, or hashtag from the post
 - `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
@@ -144,9 +148,11 @@ text-cell rendering mode.
 ### Notifications Tab
 - `j`, `Down`, `Ctrl+n`: Scroll down
 - `k`, `Up`, `Ctrl+p`: Scroll up
-- `r`: Reload notifications
+- `F5`: Reload notifications
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
+- `[`, `PageUp`: Previous page
+- `]`, `PageDown`: Next page
 - `/`: Switch to search mode
 
 ### Search Tab
@@ -154,13 +160,15 @@ text-cell rendering mode.
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
-- `r`: Reload search results
-- `N`: Reply to selected post
+- `[`, `PageUp`: Previous page
+- `]`, `PageDown`: Next page
+- `F5`: Reload search results
+- `r`: Reply to selected post
 - `Ctrl+l`: Like/unlike
 - `Ctrl+r`: Repost/unrepost
-- `Enter`: Open attached images
-- `b`: Open selected post in browser
-- `t`: Open selected post thread
+- `Enter`: Open selected post thread
+- `i`, `Space`: Open attached images
+- `o`: Open selected post in browser
 - `e`: Open an external link or video embed
 - `f`: Select a URL, mention, or hashtag from the post
 - `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
@@ -169,11 +177,13 @@ text-cell rendering mode.
 ### Thread Viewer
 - `j`, `Down`, `Ctrl+n`: Move down through the thread
 - `k`, `Up`, `Ctrl+p`: Move up through the thread
-- `b`: Open the selected post in browser
+- `o`: Open the selected post in browser
+- `a`: Open the selected post author profile
+- `i`, `Space`: Open attached images
 - `e`: Open an external link or video embed
 - `f`: Select a URL, mention, or hashtag from the post
 - `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
-- `q`, `Esc`: Close the thread
+- `Esc`: Close the thread
 
 ### Profile Viewer
 - `h`, `Left`: Previous profile section
@@ -184,16 +194,17 @@ text-cell rendering mode.
 - `m`, `B`, `!`: Mute/unmute, block/unblock, or report the profile
 - `g`: Show followers
 - `G`: Show following
-- `p`: Open the selected post author profile
+- `a`: Open the selected post author profile
 - `t`: Open the selected post thread
-- `Enter`, `b`: Open the selected post, feed, list, or starter pack
-- `q`, `Esc`: Close the profile
+- `i`, `Space`: Open attached images when the selected item is a post
+- `Enter`, `o`: Open the selected post, feed, list, or starter pack
+- `Esc`: Close the profile
 
 ### Facet and Interaction Lists
 - `j`, `Down`: Move down
 - `k`, `Up`: Move up
-- `Enter`, `b`: Open the selected item in browser
-- `q`, `Esc`: Close the list
+- `Enter`, `o`: Open the selected item in browser
+- `Esc`: Close the list
 
 ### Feed Selector
 - `j`, `Down`: Move down
@@ -201,12 +212,12 @@ text-cell rendering mode.
 - `Enter`: Switch to the selected feed
 - `/`: Search custom feeds
 - `s`: Save or unsave a custom feed
-- `q`, `Esc`: Close the selector
+- `Esc`: Close the selector
 
 ### Image Viewer
 - `h`, `Left`: Previous image
 - `l`, `Right`: Next image
-- `q`, `Esc`: Close image viewer
+- `Esc`: Close image viewer
 
 ### Post/Reply Mode
 - `Esc`: Cancel

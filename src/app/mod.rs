@@ -106,6 +106,7 @@ pub struct App {
     feed_viewer: Option<FeedViewer>,
     composer_preview: Option<bsky::LinkPreview>,
     pub(crate) help_table_state: TableState,
+    help_return_mode: state::Mode,
 }
 
 impl App {
@@ -128,6 +129,72 @@ impl App {
             feed_viewer: None,
             composer_preview: None,
             help_table_state: TableState::default().with_selected(Some(0)),
+            help_return_mode: state::Mode::Normal,
+        }
+    }
+
+    fn open_help(&mut self) {
+        self.help_return_mode = self.state.get_mode();
+        self.help_table_state.select(Some(0));
+        self.state.set_mode(state::Mode::Help);
+    }
+
+    fn close_help(&mut self) {
+        self.state.set_mode(self.help_return_mode);
+    }
+
+    pub(crate) fn content_mode(&self) -> state::Mode {
+        if self.state.is_help_mode() {
+            self.help_return_mode
+        } else {
+            self.state.get_mode()
+        }
+    }
+
+    pub(crate) fn key_hints(&self) -> &'static str {
+        if self.error.is_some() {
+            return "Esc dismiss   q quit";
+        }
+        if self.pending_confirmation.is_some() || self.pending_delete.is_some() {
+            return "y/Enter confirm   Esc cancel";
+        }
+        if self.composer_preview.is_some() {
+            return "any key close preview";
+        }
+        if self.state.is_help_mode() {
+            return "↑/↓ move   PgUp/PgDn jump   Esc close";
+        }
+        if self.state.is_feed_search_mode() {
+            return "Enter search   Esc cancel";
+        }
+        if self.feed_viewer.is_some() {
+            return "↑/↓ select   Enter choose   / search   s save   Esc close";
+        }
+        if self.image_viewer.is_some() {
+            return "←/→ image   Esc close";
+        }
+        if self.facet_viewer.is_some() || self.interaction_viewer.is_some() {
+            return "↑/↓ select   Enter open   Esc close";
+        }
+        match self.state.get_mode() {
+            state::Mode::Post | state::Mode::Reply => {
+                "Ctrl+S send   Enter newline   Ctrl+V preview   Esc cancel"
+            }
+            state::Mode::Search | state::Mode::UserSearch => "Enter search   Esc cancel",
+            state::Mode::Profile => {
+                "↑/↓ select   ←/→ section   Enter open   i image   Esc back   ? help"
+            }
+            state::Mode::Thread => {
+                "↑/↓ select   i image   o browser   a author   Esc back   ? help"
+            }
+            state::Mode::Normal => match self.state.get_tab() {
+                Tab::Home => "↑/↓ select   Enter thread   n post   r reply   Tab switch   ? help",
+                Tab::Notifications => "↑/↓ select   Enter open   ←/→ page   Tab switch   ? help",
+                Tab::Search => {
+                    "↑/↓ select   Enter thread   i image   / search   Tab switch   ? help"
+                }
+            },
+            state::Mode::Help | state::Mode::FeedSearch => unreachable!(),
         }
     }
 
@@ -149,6 +216,31 @@ impl App {
                 }
                 _ => AppReturn::Continue,
             };
+        }
+
+        // Ctrl+C is the unconditional emergency exit. Esc is reserved for
+        // cancelling or closing the current layer.
+        if key == Key::Ctrl('c') {
+            return AppReturn::Exit;
+        }
+        if key == Key::Char('q')
+            && !matches!(
+                self.state.get_mode(),
+                state::Mode::Post
+                    | state::Mode::Reply
+                    | state::Mode::Search
+                    | state::Mode::UserSearch
+                    | state::Mode::FeedSearch
+            )
+        {
+            return AppReturn::Exit;
+        }
+
+        if self.error.is_some() {
+            if key == Key::Esc {
+                self.error = None;
+            }
+            return AppReturn::Continue;
         }
 
         if self.pending_confirmation.is_some() || self.pending_delete.is_some() {
@@ -191,8 +283,8 @@ impl App {
 
     async fn timeline_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
-            Key::Char('r') => {
+            Key::Ctrl('c') => AppReturn::Exit,
+            Key::F5 => {
                 self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
                     .await;
                 AppReturn::Continue
@@ -212,7 +304,7 @@ impl App {
                 self.state.set_mode(state::Mode::Post);
                 AppReturn::Continue
             }
-            Key::Char('N') => {
+            Key::Char('r') => {
                 self.state.set_mode(state::Mode::Reply);
                 AppReturn::Continue
             }
@@ -230,8 +322,8 @@ impl App {
                 self.dispatch(IoEvent::Like).await;
                 AppReturn::Continue
             }
-            Key::Char('?') => {
-                self.state.set_mode(state::Mode::Help);
+            Key::Char('?') | Key::F1 => {
+                self.open_help();
                 AppReturn::Continue
             }
             Key::Char('/') => {
@@ -252,7 +344,7 @@ impl App {
                 self.state.move_tl_scroll_up();
                 AppReturn::Continue
             }
-            Key::Char('b') => {
+            Key::Char('o') => {
                 if let Some(feed) = self.state.get_current_feed() {
                     if let Some(id) = feed.post.uri.split('/').next_back() {
                         let handle = &feed.post.author.handle;
@@ -263,14 +355,14 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('t') => {
+            Key::Enter => {
                 if let Some(feed) = self.state.get_current_feed() {
                     self.dispatch(IoEvent::LoadThread(feed.post.uri.clone()))
                         .await;
                 }
                 AppReturn::Continue
             }
-            Key::Char('p') => {
+            Key::Char('a') => {
                 if let Some(feed) = self.state.get_current_feed() {
                     self.dispatch(IoEvent::LoadProfile(feed.post.author.did.clone().into()))
                         .await;
@@ -317,18 +409,12 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Enter => {
-                let moderation = self.state.moderation();
-                let (urls, alt_texts) = self.state.get_current_feed().map_or_else(
-                    || (Vec::new(), Vec::new()),
-                    |feed| {
-                        (
-                            bsky::post_attachment_fullsize_urls(&feed.post, &moderation),
-                            bsky::post_attachment_alt_texts(&feed.post),
-                        )
-                    },
+            Key::Char('i') | Key::Char(' ') => {
+                self.open_post_images(
+                    self.state
+                        .get_current_feed()
+                        .map(|feed| feed.post.data.clone()),
                 );
-                self.open_image_viewer(urls, alt_texts);
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -346,12 +432,12 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('h') | Key::Left => {
+            Key::Char('h') | Key::Left | Key::Char('[') | Key::PageUp => {
                 self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Prev))
                     .await;
                 AppReturn::Continue
             }
-            Key::Char('l') | Key::Right => {
+            Key::Char('l') | Key::Right | Key::Char(']') | Key::PageDown => {
                 self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Next))
                     .await;
                 AppReturn::Continue
@@ -362,14 +448,14 @@ impl App {
 
     async fn notifications_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
-            Key::Char('r') => {
+            Key::Ctrl('c') => AppReturn::Exit,
+            Key::F5 => {
                 self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Reload))
                     .await;
                 AppReturn::Continue
             }
-            Key::Char('?') => {
-                self.state.set_mode(state::Mode::Help);
+            Key::Char('?') | Key::F1 => {
+                self.open_help();
                 AppReturn::Continue
             }
             Key::Char('/') => {
@@ -390,7 +476,7 @@ impl App {
                 self.state.move_notifications_scroll_up();
                 AppReturn::Continue
             }
-            Key::Enter | Key::Char('b') => {
+            Key::Enter | Key::Char('o') => {
                 let url = self
                     .state
                     .get_current_notification()
@@ -409,7 +495,7 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('p') => {
+            Key::Char('a') => {
                 if let Some(notification) = self.state.get_current_notification() {
                     self.dispatch(IoEvent::LoadProfile(notification.author.did.clone().into()))
                         .await;
@@ -431,12 +517,12 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('h') | Key::Left => {
+            Key::Char('h') | Key::Left | Key::Char('[') | Key::PageUp => {
                 self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Prev))
                     .await;
                 AppReturn::Continue
             }
-            Key::Char('l') | Key::Right => {
+            Key::Char('l') | Key::Right | Key::Char(']') | Key::PageDown => {
                 self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Next))
                     .await;
                 AppReturn::Continue
@@ -447,12 +533,12 @@ impl App {
 
     async fn search_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
-            Key::Char('r') => {
+            Key::Ctrl('c') => AppReturn::Exit,
+            Key::F5 => {
                 self.dispatch(IoEvent::Search(SearchEvent::Reload)).await;
                 AppReturn::Continue
             }
-            Key::Char('N') => {
+            Key::Char('r') => {
                 self.state.set_tab(Tab::Search);
                 self.state.set_mode(state::Mode::Reply);
                 AppReturn::Continue
@@ -471,8 +557,8 @@ impl App {
                 self.dispatch(IoEvent::SearchLike).await;
                 AppReturn::Continue
             }
-            Key::Char('?') => {
-                self.state.set_mode(state::Mode::Help);
+            Key::Char('?') | Key::F1 => {
+                self.open_help();
                 AppReturn::Continue
             }
             Key::Char('/') => {
@@ -493,7 +579,7 @@ impl App {
                 self.state.move_search_scroll_up();
                 AppReturn::Continue
             }
-            Key::Char('b') => {
+            Key::Char('o') => {
                 if let Some(feed) = self.state.get_current_search_result() {
                     if let Some(id) = feed.uri.split('/').next_back() {
                         let handle = &feed.author.handle;
@@ -504,13 +590,13 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('t') => {
+            Key::Enter => {
                 if let Some(post) = self.state.get_current_search_result() {
                     self.dispatch(IoEvent::LoadThread(post.uri.clone())).await;
                 }
                 AppReturn::Continue
             }
-            Key::Char('p') => {
+            Key::Char('a') => {
                 if let Some(post) = self.state.get_current_search_result() {
                     self.dispatch(IoEvent::LoadProfile(post.author.did.clone().into()))
                         .await;
@@ -548,18 +634,8 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Enter => {
-                let moderation = self.state.moderation();
-                let (urls, alt_texts) = self.state.get_current_search_result().map_or_else(
-                    || (Vec::new(), Vec::new()),
-                    |post| {
-                        (
-                            bsky::post_attachment_fullsize_urls(&post, &moderation),
-                            bsky::post_attachment_alt_texts(&post),
-                        )
-                    },
-                );
-                self.open_image_viewer(urls, alt_texts);
+            Key::Char('i') | Key::Char(' ') => {
+                self.open_post_images(self.state.get_current_search_result());
                 AppReturn::Continue
             }
             Key::Tab => {
@@ -577,7 +653,7 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('h') | Key::Left => {
+            Key::Char('h') | Key::Left | Key::Char('[') | Key::PageUp => {
                 match self.state.get_search_query() {
                     Some(_) => {
                         self.dispatch(IoEvent::Search(SearchEvent::Prev)).await;
@@ -590,7 +666,7 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('l') | Key::Right => {
+            Key::Char('l') | Key::Right | Key::Char(']') | Key::PageDown => {
                 match self.state.get_search_query() {
                     Some(_) => {
                         self.dispatch(IoEvent::Search(SearchEvent::Next)).await;
@@ -609,7 +685,8 @@ impl App {
 
     async fn profile_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc => self.state.close_profile(),
+            Key::Esc => self.state.close_profile(),
+            Key::Char('?') | Key::F1 => self.open_help(),
             Key::Down | Key::Char('j') | Key::Ctrl('n') => self.state.move_profile_down(),
             Key::Up | Key::Char('k') | Key::Ctrl('p') => self.state.move_profile_up(),
             Key::Left | Key::Char('h') => {
@@ -664,13 +741,20 @@ impl App {
                         .await;
                 }
             }
-            Key::Char('p') => {
+            Key::Char('a') => {
                 if let Some(feed) = self.state.get_current_profile_post() {
                     self.dispatch(IoEvent::LoadProfile(feed.post.author.did.clone().into()))
                         .await;
                 }
             }
-            Key::Enter | Key::Char('b') => {
+            Key::Char('i') | Key::Char(' ') => {
+                self.open_post_images(
+                    self.state
+                        .get_current_profile_post()
+                        .map(|feed| feed.post.data.clone()),
+                );
+            }
+            Key::Enter | Key::Char('o') => {
                 let url = self
                     .state
                     .get_current_profile_post()
@@ -691,10 +775,11 @@ impl App {
 
     async fn thread_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc => self.state.close_thread(),
+            Key::Esc => self.state.close_thread(),
+            Key::Char('?') | Key::F1 => self.open_help(),
             Key::Down | Key::Char('j') | Key::Ctrl('n') => self.state.move_thread_down(),
             Key::Up | Key::Char('k') | Key::Ctrl('p') => self.state.move_thread_up(),
-            Key::Char('b') => {
+            Key::Char('o') => {
                 if let Some(post) = self.state.get_current_thread_post() {
                     if let Some(url) = bsky::get_url(post.author.handle.clone(), post.uri.clone()) {
                         if let Err(error) = webbrowser::open(&url) {
@@ -709,11 +794,14 @@ impl App {
             Key::Char('f') => {
                 self.open_facet_viewer(self.state.get_current_thread_post());
             }
-            Key::Char('p') => {
+            Key::Char('a') => {
                 if let Some(post) = self.state.get_current_thread_post() {
                     self.dispatch(IoEvent::LoadProfile(post.author.did.clone().into()))
                         .await;
                 }
+            }
+            Key::Char('i') | Key::Char(' ') => {
+                self.open_post_images(self.state.get_current_thread_post());
             }
             Key::Char('X') => {
                 if let Some(post) = self.state.get_current_thread_post() {
@@ -756,6 +844,20 @@ impl App {
         if let Err(error) = webbrowser::open(&url) {
             self.set_error(format!("Could not open embedded content: {error}"));
         }
+    }
+
+    fn open_post_images(&mut self, post: Option<atrium_api::app::bsky::feed::defs::PostViewData>) {
+        let moderation = self.state.moderation();
+        let (urls, alt_texts) = post.map_or_else(
+            || (Vec::new(), Vec::new()),
+            |post| {
+                (
+                    bsky::post_attachment_fullsize_urls(&post, &moderation),
+                    bsky::post_attachment_alt_texts(&post),
+                )
+            },
+        );
+        self.open_image_viewer(urls, alt_texts);
     }
 
     fn start_quote_composer(&mut self, post: &atrium_api::app::bsky::feed::defs::PostViewData) {
@@ -1032,8 +1134,8 @@ impl App {
 
     async fn help_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc | Key::Char('?') => {
-                self.state.set_mode(state::Mode::Normal);
+            Key::Esc | Key::Char('?') | Key::F1 => {
+                self.close_help();
                 AppReturn::Continue
             }
             Key::Char('j') | Key::Down => {
@@ -1074,7 +1176,7 @@ impl App {
 
     fn image_viewer_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc => self.image_viewer = None,
+            Key::Esc => self.image_viewer = None,
             Key::Char('h') | Key::Left => {
                 if let Some(viewer) = &mut self.image_viewer {
                     viewer.previous();
@@ -1092,7 +1194,7 @@ impl App {
 
     fn facet_viewer_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc => self.facet_viewer = None,
+            Key::Esc => self.facet_viewer = None,
             Key::Char('k') | Key::Up => {
                 if let Some(viewer) = &mut self.facet_viewer {
                     viewer.previous();
@@ -1103,7 +1205,7 @@ impl App {
                     viewer.next();
                 }
             }
-            Key::Enter | Key::Char('b') => {
+            Key::Enter | Key::Char('o') => {
                 let url = self
                     .facet_viewer
                     .as_ref()
@@ -1137,7 +1239,7 @@ impl App {
 
     async fn interaction_viewer_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc => self.interaction_viewer = None,
+            Key::Esc => self.interaction_viewer = None,
             Key::Char('k') | Key::Up => {
                 if let Some(viewer) = &mut self.interaction_viewer {
                     viewer.index = viewer.index.saturating_sub(1);
@@ -1150,7 +1252,7 @@ impl App {
                     }
                 }
             }
-            Key::Enter | Key::Char('b') => {
+            Key::Enter | Key::Char('o') => {
                 let selected = self
                     .interaction_viewer
                     .as_ref()
@@ -1171,7 +1273,7 @@ impl App {
 
     async fn feed_viewer_action(&mut self, key: Key) -> AppReturn {
         match key {
-            Key::Char('q') | Key::Esc => self.feed_viewer = None,
+            Key::Esc => self.feed_viewer = None,
             Key::Char('k') | Key::Up => {
                 if let Some(viewer) = &mut self.feed_viewer {
                     viewer.index = viewer.index.saturating_sub(1);

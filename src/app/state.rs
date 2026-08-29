@@ -16,7 +16,7 @@ use crate::app::moderation::ModerationPrefs;
 use crate::app::profile::{ProfileContent, ProfileSection, ProfileState};
 use crate::app::thread::ThreadEntry;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Normal,
     Post,
@@ -46,7 +46,7 @@ impl fmt::Display for Mode {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Home,
     Notifications,
@@ -740,7 +740,7 @@ impl AppState {
 
     pub fn get_mode(&self) -> Mode {
         if let Self::Initialized { mode, .. } = self {
-            mode.clone()
+            *mode
         } else {
             Mode::Normal
         }
@@ -843,7 +843,7 @@ impl AppState {
 
     pub fn get_tab(&self) -> Tab {
         if let Self::Initialized { tab, .. } = self {
-            tab.clone()
+            *tab
         } else {
             Tab::Home
         }

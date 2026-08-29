@@ -37,9 +37,9 @@ where
         let area = layout::popup(60, 20, size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
-    } else if app.state.is_profile_mode() {
+    } else if app.content_mode() == crate::app::state::Mode::Profile {
         render_profile(f, app, body_chunks[1]);
-    } else if app.state.is_thread_mode() {
+    } else if app.content_mode() == crate::app::state::Mode::Thread {
         let thread = draw::thread(app.state(), body_chunks[1].width);
         let mut list_state = app.state.get_thread_list_state();
         list_state.select(Some(app.state.get_thread_list_position()));
@@ -73,6 +73,8 @@ where
             }
         };
     }
+
+    f.render_widget(draw::key_hints(app.key_hints()), main_chunks[2]);
 
     if app.state.is_help_mode() {
         let popup = draw::help();

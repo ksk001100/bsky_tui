@@ -39,10 +39,16 @@ pub fn title<'a>() -> Paragraph<'a> {
 }
 
 pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
-    Paragraph::new(format!("Mode: {} (type `?` for help)", state.get_mode()))
+    Paragraph::new(format!("{}", state.get_mode()))
         .style(Style::default().fg(Color::LightCyan))
         .alignment(Alignment::Center)
         .block(Block::default().style(Style::default().fg(Color::White)))
+}
+
+pub fn key_hints(hints: &str) -> Paragraph<'_> {
+    Paragraph::new(hints)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center)
 }
 
 pub fn splash<'a>(text: String) -> Paragraph<'a> {
@@ -63,18 +69,16 @@ pub fn loading<'a>() -> Paragraph<'a> {
 }
 
 pub fn error<'a>(message: &str) -> Paragraph<'a> {
-    Paragraph::new(format!(
-        "{message}\n\nRetry the action, or press q/Esc to quit."
-    ))
-    .style(Style::default().fg(Color::LightRed).bg(Color::Black))
-    .alignment(Alignment::Left)
-    .wrap(ratatui::widgets::Wrap { trim: true })
-    .block(
-        Block::default()
-            .title("Error")
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 1, 1, 1)),
-    )
+    Paragraph::new(format!("{message}\n\nPress Esc to dismiss, or q to quit."))
+        .style(Style::default().fg(Color::LightRed).bg(Color::Black))
+        .alignment(Alignment::Left)
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .block(
+            Block::default()
+                .title("Error")
+                .borders(Borders::ALL)
+                .padding(Padding::new(1, 1, 1, 1)),
+        )
 }
 
 pub fn confirmation(message: String) -> Paragraph<'static> {
@@ -129,7 +133,7 @@ pub fn facets(facets: Vec<bsky::PostFacet>) -> List<'static> {
         .collect::<Vec<_>>();
     List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default()
-            .title(" Links — j/k select, Enter open, Esc close ")
+            .title(" Links — ↑/↓ select, Enter open, Esc close ")
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1)),
     )
@@ -154,7 +158,7 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
     };
     List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default()
-            .title(format!("{title}— j/k select, Enter open, Esc close "))
+            .title(format!("{title}— ↑/↓ select, Enter open, Esc close "))
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1)),
     )
@@ -316,124 +320,52 @@ pub fn profile_items(profile: &ProfileState) -> List<'static> {
     };
     List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default().borders(Borders::ALL).title(format!(
-            " {} — Enter open in browser ",
+            " {} — ↑/↓ select, Enter open, Esc back ",
             profile.section.label()
         )),
     )
 }
 
-const HELP_ROWS: &[(&str, &str, &str, &str)] = &[
-    (
-        "Normal Mode",
-        "Home/Notifications/Search",
-        "Tab",
-        "Change tab",
-    ),
-    ("", "Home/Notifications/Search", "q, Ctrl+c, Esc", "Quit"),
-    ("", "Home/Notifications/Search", "r", "Reload list"),
-    ("", "Home/Notifications/Search", "u", "Search users"),
-    ("", "Home/Notifications/Search", "?", "Show help popup"),
-    ("", "Home/Notifications/Search", "/", "Search mode"),
-    ("", "Home/Notifications", "n", "New post popup"),
-    ("", "Home/Notifications", "N", "Reply selected post popup"),
-    (
-        "",
-        "Home",
-        "c",
-        "Select Following, Discover, or custom feed",
-    ),
-    (
-        "",
-        "Home/Notifications/Search",
-        "j, Ctrl+n, Down",
-        "Select next post",
-    ),
-    (
-        "",
-        "Home/Notifications/Search",
-        "k, Ctrl+p, Up",
-        "Select previous post",
-    ),
-    ("", "Home/Search", "l, Right", "Next page"),
-    ("", "Home/Search", "h, Left", "Prev page"),
-    ("", "Home/Search", "Enter", "Open selected post images"),
-    ("", "Home/Search", "b", "Selected post open in browser"),
-    ("", "Home/Search", "t", "Open selected post thread"),
-    ("", "Home/Search/Thread", "e", "Open link or video embed"),
-    (
-        "",
-        "Home/Search/Thread",
-        "f",
-        "Select URL, mention, or hashtag",
-    ),
-    (
-        "",
-        "Home/Search/Thread",
-        "L / R / Q",
-        "Show Likes / Reposts / Quotes",
-    ),
-    ("", "Home/Search/Thread", "X", "Quote selected post"),
-    (
-        "",
-        "Home/Search/Thread",
-        "m / B / !",
-        "Mute / block / report",
-    ),
-    ("", "Home/Search/Thread", "D", "Delete your selected post"),
-    ("Profile", "", "h/l, Left/Right", "Switch profile section"),
-    ("", "", "F", "Follow or unfollow profile"),
-    ("", "", "m / B / !", "Mute / block / report profile"),
-    ("", "", "g / G", "Show followers / following"),
-    ("", "", "Enter, b", "Open selected profile item"),
-    (
-        "",
-        "Notifications",
-        "Enter, b",
-        "Open notification post in browser",
-    ),
-    (
-        "Image Viewer",
-        "",
-        "h/l, Left/Right",
-        "Show previous/next image",
-    ),
-    ("", "", "q, Esc", "Close image viewer"),
-    (
-        "Thread",
-        "",
-        "j/k, Up/Down",
-        "Move through ancestors and replies",
-    ),
-    ("", "", "b / q, Esc", "Open in browser / close thread"),
-    (
-        "",
-        "Home/Search",
-        "Ctrl+r",
-        "Repost selected post (unrepost if already reposted)",
-    ),
-    (
-        "",
-        "Home/Search",
-        "Ctrl+l",
-        "Like selected post (unlike if already liked)",
-    ),
-    ("Post/Reply/Search", "", "Esc", "Return to normal mode"),
-    ("", "", "Ctrl+s / Enter", "Send post/reply / insert newline"),
-    ("", "", "Ctrl+v", "Preview !link card"),
-    ("", "", "!image / !link", "Add image or external card"),
-    ("", "", "!lang / !label", "Set language or content warning"),
-    (
-        "",
-        "",
-        "!replies / ---",
-        "Set reply controls / split thread",
-    ),
-    ("", "", "Left, Ctrl+b", "Move cursor left"),
-    ("", "", "Right, Ctrl+f", "Move cursor right"),
-    ("", "", "Ctrl+a", "Move cursor to start of line"),
-    ("", "", "Ctrl+e", "Move cursor to end of line"),
-    ("", "", "Backspace, Ctrl+h", "Delete word"),
-    ("Help", "", "Esc, q, ?", "Return to normal mode"),
+const HELP_ROWS: &[(&str, &str, &str)] = &[
+    ("Browse screens", "? / F1", "Open or close help"),
+    ("", "Esc", "Cancel, close, or go back"),
+    ("", "q", "Quit from any browsing screen"),
+    ("", "Ctrl+C", "Quit immediately"),
+    ("Main tabs", "Tab", "Switch Home → Notifications → Search"),
+    ("", "↑/↓ or j/k", "Move selection"),
+    ("", "←/→ or h/l", "Previous or next page"),
+    ("", "[/] or PgUp/PgDn", "Previous or next page"),
+    ("", "F5", "Reload the current list"),
+    ("", "/", "Search posts"),
+    ("", "u", "Search users"),
+    ("Home", "n / r", "New post / reply"),
+    ("", "c", "Choose a feed"),
+    ("Timeline posts", "Enter", "Open thread"),
+    ("", "i / Space", "View attached images"),
+    ("", "o", "Open in browser"),
+    ("", "a", "Open author profile"),
+    ("", "e / f", "Open embed / choose link or tag"),
+    ("", "Ctrl+L / Ctrl+R", "Like / repost"),
+    ("", "L / R / Q", "List likes / reposts / quotes"),
+    ("", "X", "Quote post"),
+    ("", "m / B / !", "Mute / block / report"),
+    ("", "D", "Delete your own post"),
+    ("Profile", "←/→ or h/l", "Switch profile section"),
+    ("", "F", "Follow or unfollow"),
+    ("", "g / G", "List followers / following"),
+    ("", "Enter / o", "Open selected item"),
+    ("Thread", "↑/↓ or j/k", "Move through the conversation"),
+    ("", "o / a", "Open post / author"),
+    ("Viewers", "←/→ or h/l", "Previous or next image"),
+    ("", "↑/↓ or j/k", "Move through a list"),
+    ("", "Enter / o", "Open selected item"),
+    ("Composer", "Ctrl+S", "Send post or reply"),
+    ("", "Enter", "Insert newline"),
+    ("", "Ctrl+V", "Preview first !link card"),
+    ("", "←/→", "Move cursor (Ctrl+B / Ctrl+F also work)"),
+    ("", "Ctrl+A / Ctrl+E", "Start / end of line"),
+    ("", "Backspace", "Delete previous character"),
+    ("Search input", "Enter / Esc", "Run search / cancel"),
 ];
 
 pub(crate) const HELP_ROW_COUNT: usize = HELP_ROWS.len();
@@ -442,13 +374,12 @@ pub fn help<'a>() -> Table<'a> {
     let header_style = Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD);
-    let header = Row::new(["Mode", "Tabs", "Key", "Description"])
+    let header = Row::new(["Context", "Keys", "Action"])
         .style(header_style)
         .bottom_margin(1);
-    let rows = HELP_ROWS.iter().map(|(mode, tabs, key, description)| {
+    let rows = HELP_ROWS.iter().map(|(context, key, description)| {
         Row::new([
-            Cell::from(*mode),
-            Cell::from(*tabs),
+            Cell::from(*context),
             Cell::from(*key),
             Cell::from(*description),
         ])
@@ -457,10 +388,9 @@ pub fn help<'a>() -> Table<'a> {
     Table::new(
         rows,
         [
-            Constraint::Length(17),
-            Constraint::Length(26),
-            Constraint::Length(20),
-            Constraint::Min(24),
+            Constraint::Length(14),
+            Constraint::Length(22),
+            Constraint::Min(28),
         ],
     )
     .header(header)
@@ -468,7 +398,7 @@ pub fn help<'a>() -> Table<'a> {
     .highlight_symbol("▸ ")
     .block(
         Block::default()
-            .title(" Help — j/k or ↑/↓ move, PgUp/PgDn jump, q/Esc/? close ")
+            .title(" Keyboard help — ↑/↓ move, PgUp/PgDn jump, Esc close ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White).bg(Color::Black))
             .border_type(BorderType::Plain),

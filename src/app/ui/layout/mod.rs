@@ -5,7 +5,11 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 pub fn main(rect: Rect) -> Rc<[Rect]> {
     Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Percentage(90)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .margin(1)
         .split(rect)
 }
