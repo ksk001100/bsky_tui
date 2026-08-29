@@ -30,6 +30,21 @@ impl IoAsyncHandler {
             IoEvent::LoadTimeline(action) => self.do_load_timeline(action).await,
             IoEvent::SendPost => self.do_send_post().await,
             IoEvent::LoadNotifications(action) => self.do_load_notifications(action).await,
+            IoEvent::LoadNotificationSettings(subject, handle) => {
+                self.do_load_notification_settings(subject, handle).await
+            }
+            IoEvent::SaveNotificationPreferences(preferences) => {
+                self.do_save_notification_preferences(*preferences).await
+            }
+            IoEvent::SaveActivitySubscription { subject, activity } => {
+                self.do_save_activity_subscription(subject, activity).await
+            }
+            IoEvent::ToggleNotificationFollow(subject) => {
+                self.do_toggle_notification_follow(subject).await
+            }
+            IoEvent::LikeNotificationAuthor(subject) => {
+                self.do_like_notification_author(subject).await
+            }
             IoEvent::Like => self.do_like().await,
             IoEvent::Repost => self.do_repost().await,
             IoEvent::Reply => self.do_reply().await,
@@ -487,6 +502,95 @@ impl IoAsyncHandler {
         Ok(())
     }
 
+    async fn do_load_notification_settings(
+        &mut self,
+        subject: atrium_api::types::string::Did,
+        handle: String,
+    ) -> Result<()> {
+        let agent = self.agent().await?;
+        let preferences = bsky::notification_preferences(agent.as_ref()).await?;
+        let profile = bsky::profile(agent.as_ref(), subject.clone().into()).await?;
+        let activity = profile
+            .viewer
+            .as_ref()
+            .and_then(|viewer| viewer.activity_subscription.clone())
+            .unwrap_or_else(|| {
+                atrium_api::app::bsky::notification::defs::ActivitySubscriptionData {
+                    post: false,
+                    reply: false,
+                }
+                .into()
+            });
+        self.app.lock().await.notification_settings =
+            Some(crate::app::notifications::NotificationSettings {
+                preferences,
+                category: 0,
+                activity_subject: Some((subject, handle, activity)),
+            });
+        Ok(())
+    }
+
+    async fn do_toggle_notification_follow(
+        &mut self,
+        subject: atrium_api::types::string::Did,
+    ) -> Result<()> {
+        let agent = self.agent().await?;
+        let profile = bsky::profile(agent.as_ref(), subject.into()).await?;
+        bsky::toggle_follow(agent.as_ref(), &profile).await?;
+        self.do_load_notifications(NotificationEvent::Reload).await
+    }
+
+    async fn do_like_notification_author(
+        &mut self,
+        subject: atrium_api::types::string::Did,
+    ) -> Result<()> {
+        let agent = self.agent().await?;
+        let content = bsky::profile_content(
+            agent.as_ref(),
+            subject.clone().into(),
+            crate::app::profile::ProfileSection::Posts,
+        )
+        .await?;
+        let post = match content {
+            crate::app::profile::ProfileContent::Posts(posts) => posts
+                .into_iter()
+                .map(|item| item.post.clone())
+                .find(|post| post.author.did == subject),
+            _ => None,
+        }
+        .ok_or_else(|| eyre!("this account has no post to like"))?;
+        if post
+            .viewer
+            .as_ref()
+            .and_then(|viewer| viewer.like.as_ref())
+            .is_none()
+        {
+            bsky::like(
+                agent.as_ref(),
+                self.app.lock().await.state.get_did(),
+                post.cid.clone(),
+                post.uri.clone(),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn do_save_notification_preferences(
+        &self,
+        preferences: atrium_api::app::bsky::notification::defs::Preferences,
+    ) -> Result<()> {
+        bsky::put_notification_preferences(self.agent().await?.as_ref(), preferences).await
+    }
+
+    async fn do_save_activity_subscription(
+        &self,
+        subject: atrium_api::types::string::Did,
+        activity: atrium_api::app::bsky::notification::defs::ActivitySubscription,
+    ) -> Result<()> {
+        bsky::put_activity_subscription(self.agent().await?.as_ref(), subject, activity).await
+    }
+
     async fn do_search(&mut self, event: SearchEvent) -> Result<()> {
         let (current, cursors, existing_query) = {
             let app = self.app.lock().await;
@@ -697,6 +801,11 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::Initialize => "Initialization",
         IoEvent::LoadTimeline(_) => "Timeline request",
         IoEvent::LoadNotifications(_) => "Notification request",
+        IoEvent::LoadNotificationSettings(_, _) => "Notification settings request",
+        IoEvent::SaveNotificationPreferences(_) => "Notification settings update",
+        IoEvent::SaveActivitySubscription { .. } => "Activity notification update",
+        IoEvent::ToggleNotificationFollow(_) => "Follow update",
+        IoEvent::LikeNotificationAuthor(_) => "Like back",
         IoEvent::SendPost => "Post",
         IoEvent::Like | IoEvent::SearchLike => "Like",
         IoEvent::Repost | IoEvent::SearchRepost => "Repost",

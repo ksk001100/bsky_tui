@@ -13,6 +13,7 @@ use tui_input::{Input, InputRequest};
 
 use crate::app::feed::{FeedDescriptor, FeedSnapshot};
 use crate::app::moderation::ModerationPrefs;
+use crate::app::notifications::{self, NotificationFilters, NotificationGroup};
 use crate::app::profile::{ProfileContent, ProfileSection, ProfileState};
 use crate::app::thread::ThreadEntry;
 
@@ -81,6 +82,7 @@ pub enum AppState {
         notifications_list_position: usize,
         notifications_current_cursor_index: usize,
         notification_cursors: Vec<Option<String>>,
+        notification_filters: NotificationFilters,
         search_list_state: ListState,
         search_list_position: usize,
         handle: Handle,
@@ -122,6 +124,7 @@ impl AppState {
             notifications_list_position: 0,
             notifications_current_cursor_index: 0,
             notification_cursors: vec![None],
+            notification_filters: NotificationFilters::default(),
             search_list_state: ListState::default().with_selected(Some(0)),
             search_list_position: 0,
             handle,
@@ -487,10 +490,12 @@ impl AppState {
             notifications_list_position,
             notifications_list_state,
             notifications: Some(notifications),
+            notification_filters,
             ..
         } = self
         {
-            if *notifications_list_position + 1 < notifications.len() {
+            let len = notifications::groups(notifications, *notification_filters).len();
+            if *notifications_list_position + 1 < len {
                 *notifications_list_position += 1;
                 notifications_list_state.select(Some(*notifications_list_position));
             }
@@ -895,12 +900,86 @@ impl AppState {
             ..
         } = self
         {
-            notifications
-                .as_ref()
-                .and_then(|items| items.get(*notifications_list_position))
-                .cloned()
+            let filters = self.notification_filters();
+            notifications.as_ref().and_then(|items| {
+                notifications::groups(items, filters)
+                    .get(*notifications_list_position)
+                    .map(|group| group.primary().clone())
+            })
         } else {
             None
+        }
+    }
+
+    pub fn notification_filters(&self) -> NotificationFilters {
+        if let Self::Initialized {
+            notification_filters,
+            ..
+        } = self
+        {
+            *notification_filters
+        } else {
+            NotificationFilters::default()
+        }
+    }
+
+    pub fn notification_groups(&self) -> Vec<NotificationGroup> {
+        self.get_notifications()
+            .map(|items| notifications::groups(&items, self.notification_filters()))
+            .unwrap_or_default()
+    }
+
+    pub fn cycle_notification_reason_filter(&mut self) {
+        if let Self::Initialized {
+            notification_filters,
+            notifications,
+            notifications_list_position,
+            notifications_list_state,
+            ..
+        } = self
+        {
+            notification_filters.reason = notification_filters.reason.next();
+            *notifications_list_position = 0;
+            let has_items = notifications.as_ref().is_some_and(|items| {
+                !notifications::groups(items, *notification_filters).is_empty()
+            });
+            notifications_list_state.select(has_items.then_some(0));
+        }
+    }
+
+    pub fn cycle_notification_sender_filter(&mut self) {
+        if let Self::Initialized {
+            notification_filters,
+            notifications,
+            notifications_list_position,
+            notifications_list_state,
+            ..
+        } = self
+        {
+            notification_filters.sender = notification_filters.sender.next();
+            *notifications_list_position = 0;
+            let has_items = notifications.as_ref().is_some_and(|items| {
+                !notifications::groups(items, *notification_filters).is_empty()
+            });
+            notifications_list_state.select(has_items.then_some(0));
+        }
+    }
+
+    pub fn cycle_notification_read_filter(&mut self) {
+        if let Self::Initialized {
+            notification_filters,
+            notifications,
+            notifications_list_position,
+            notifications_list_state,
+            ..
+        } = self
+        {
+            notification_filters.read = notification_filters.read.next();
+            *notifications_list_position = 0;
+            let has_items = notifications.as_ref().is_some_and(|items| {
+                !notifications::groups(items, *notification_filters).is_empty()
+            });
+            notifications_list_state.select(has_items.then_some(0));
         }
     }
 

@@ -76,6 +76,14 @@ where
 
     f.render_widget(draw::key_hints(app.key_hints()), main_chunks[2]);
 
+    if let Some(settings) = app.notification_settings.as_ref() {
+        let area = layout::popup(88, 78, size);
+        let mut state =
+            ratatui::widgets::ListState::default().with_selected(Some(settings.category));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(draw::notification_settings(settings), area, &mut state);
+    }
+
     if app.state.is_help_mode() {
         let popup = draw::help();
         let area = layout::popup(90, 80, size);

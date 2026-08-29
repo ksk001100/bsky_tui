@@ -149,6 +149,13 @@ text-cell rendering mode.
 - `j`, `Down`, `Ctrl+n`: Scroll down
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `F5`: Reload notifications
+- `1`: Cycle notification reason filter
+- `2`: Cycle sender filter (all, following, others)
+- `3`: Cycle read-state filter (all, unread, read)
+- `p`: Open notification and activity settings for the selected sender
+- `f`: Follow/unfollow the selected sender
+- `L`: Like the selected sender's latest post (does nothing if already liked)
+- `a`: Open the selected sender's profile
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
 - `[`, `PageUp`: Previous page

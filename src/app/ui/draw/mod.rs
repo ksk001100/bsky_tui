@@ -22,6 +22,90 @@ use crate::{
     bsky, utils,
 };
 
+pub fn notification_settings(
+    settings: &crate::app::notifications::NotificationSettings,
+) -> List<'static> {
+    fn filterable(name: &str, include: &str, list: bool, push: bool) -> ListItem<'static> {
+        ListItem::new(format!(
+            "{name:<20} include:{include:<8} list:{} push:{}",
+            on_off(list),
+            on_off(push)
+        ))
+    }
+    fn simple(name: &str, list: bool, push: bool) -> ListItem<'static> {
+        ListItem::new(format!(
+            "{name:<20}                  list:{} push:{}",
+            on_off(list),
+            on_off(push)
+        ))
+    }
+    fn on_off(value: bool) -> &'static str {
+        if value {
+            "on "
+        } else {
+            "off"
+        }
+    }
+
+    let p = &settings.preferences;
+    let mut items = vec![
+        filterable("like", &p.like.include, p.like.list, p.like.push),
+        filterable("repost", &p.repost.include, p.repost.list, p.repost.push),
+        filterable("follow", &p.follow.include, p.follow.list, p.follow.push),
+        filterable(
+            "mention",
+            &p.mention.include,
+            p.mention.list,
+            p.mention.push,
+        ),
+        filterable("reply", &p.reply.include, p.reply.list, p.reply.push),
+        filterable("quote", &p.quote.include, p.quote.list, p.quote.push),
+        filterable(
+            "like-via-repost",
+            &p.like_via_repost.include,
+            p.like_via_repost.list,
+            p.like_via_repost.push,
+        ),
+        filterable(
+            "repost-via-repost",
+            &p.repost_via_repost.include,
+            p.repost_via_repost.list,
+            p.repost_via_repost.push,
+        ),
+        simple(
+            "subscribed-post",
+            p.subscribed_post.list,
+            p.subscribed_post.push,
+        ),
+        simple(
+            "starterpack-joined",
+            p.starterpack_joined.list,
+            p.starterpack_joined.push,
+        ),
+        simple("verified", p.verified.list, p.verified.push),
+        simple("unverified", p.unverified.list, p.unverified.push),
+        ListItem::new(format!(
+            "{:<20} include:{:<8}         push:{}",
+            "chat",
+            p.chat.include,
+            on_off(p.chat.push)
+        )),
+    ];
+    if let Some((_, handle, activity)) = &settings.activity_subject {
+        items.push(ListItem::new(""));
+        items.push(ListItem::new(format!(
+            "Activity for @{handle}: posts:{} replies:{}  (v cycles)",
+            on_off(activity.post),
+            on_off(activity.reply)
+        )));
+    }
+    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
+        Block::default().borders(Borders::ALL).title(
+            " Notification settings — Space list / p push / i audience / v activity / Esc close ",
+        ),
+    )
+}
+
 const FOCUSED_POST_STYLE: Style = Style::new()
     .fg(Color::Black)
     .bg(Color::LightCyan)
@@ -338,6 +422,22 @@ const HELP_ROWS: &[(&str, &str, &str)] = &[
     ("", "F5", "Reload the current list"),
     ("", "/", "Search posts"),
     ("", "u", "Search users"),
+    (
+        "Notifications",
+        "1 / 2 / 3",
+        "Filter by reason / sender / read state",
+    ),
+    ("", "Enter / o", "Open the related post"),
+    ("", "a / f / L", "Profile / follow / like latest post"),
+    ("", "p", "Open notification settings"),
+    (
+        "Notification settings",
+        "↑/↓ or j/k",
+        "Choose notification category",
+    ),
+    ("", "Space / p", "Toggle list / push notifications"),
+    ("", "i", "Switch audience (all / following)"),
+    ("", "v", "Cycle activity notifications for sender"),
     ("Home", "n / r", "New post / reply"),
     ("", "c", "Choose a feed"),
     ("Timeline posts", "Enter", "Open thread"),
@@ -816,15 +916,18 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 pub fn notifications<'a>(state: &AppState) -> List<'a> {
-    let notifications = state.get_notifications();
+    let notifications = state.notification_groups();
     let my_handle = state.get_handle();
     let size = crossterm::terminal::size().unwrap();
-    let border = "=".repeat((size.0 - 4) as usize);
+    let border = "=".repeat(size.0.saturating_sub(4) as usize);
 
-    let list_items: Vec<ListItem> = match notifications {
-        Some(notifications) => notifications
+    let list_items: Vec<ListItem> = if notifications.is_empty() {
+        vec![]
+    } else {
+        notifications
             .iter()
-            .map(|notification| {
+            .map(|group| {
+                let notification = group.primary();
                 let handle = notification.author.handle.to_string();
                 let display_name = notification
                     .author
@@ -840,6 +943,13 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     "follow" => Span::styled("➕", Style::default().fg(Color::Blue)),
                     "mention" => Span::styled("🔔", Style::default().fg(Color::Yellow)),
                     "quote" => Span::styled("📣", Style::default().fg(Color::Magenta)),
+                    "subscribed-post" => Span::styled("★", Style::default().fg(Color::Cyan)),
+                    "like-via-repost" | "repost-via-repost" => {
+                        Span::styled("↗", Style::default().fg(Color::Green))
+                    }
+                    "starterpack-joined" => Span::styled("✦", Style::default().fg(Color::Blue)),
+                    "verified" => Span::styled("✓", Style::default().fg(Color::Blue)),
+                    "unverified" => Span::styled("?", Style::default().fg(Color::Yellow)),
                     _ => Span::from(""),
                 };
 
@@ -847,10 +957,17 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
                     Err(_) => "".into(),
                 };
+                let unread = group.notifications.iter().any(|item| !item.is_read);
+                let grouped = if group.notifications.len() > 1 {
+                    format!(" +{} others", group.notifications.len() - 1)
+                } else {
+                    String::new()
+                };
+                let read_marker = if unread { "●" } else { "○" };
 
                 // fixme
                 let subject = match reason {
-                    "reply" | "mention" | "quote" => {
+                    "reply" | "mention" | "quote" | "subscribed-post" => {
                         if let Ok(r) = post::Record::try_from_unknown(notification.record.clone()) {
                             Some(r.text.clone())
                         } else {
@@ -878,19 +995,33 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     "follow" => "followed you",
                     "mention" => "mentioned you",
                     "quote" => "quoted your post",
+                    "subscribed-post" => "made a new activity post",
+                    "like-via-repost" => "liked your repost",
+                    "repost-via-repost" => "reposted your repost",
+                    "starterpack-joined" => "joined your starter pack",
+                    "verified" => "verified your account",
+                    "unverified" => "removed an account verification",
                     _ => "",
                 };
 
                 let item = match subject {
                     Some(subject) => vec![
                         Line::from(vec![
+                            Span::styled(
+                                format!("{read_marker} "),
+                                Style::default().fg(if unread {
+                                    Color::Cyan
+                                } else {
+                                    Color::DarkGray
+                                }),
+                            ),
                             reason_icon,
                             Span::styled(
                                 format!(" {} ", display_name),
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{} {}", handle, duration_text),
+                                format!("@{} {}{}", handle, duration_text, grouped),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -903,13 +1034,21 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     ],
                     None => vec![
                         Line::from(vec![
+                            Span::styled(
+                                format!("{read_marker} "),
+                                Style::default().fg(if unread {
+                                    Color::Cyan
+                                } else {
+                                    Color::DarkGray
+                                }),
+                            ),
                             reason_icon,
                             Span::styled(
                                 format!(" {display_name} "),
                                 Style::default().fg(Color::White),
                             ),
                             Span::styled(
-                                format!("@{handle} {duration_text}"),
+                                format!("@{handle} {duration_text}{grouped}"),
                                 Style::default().fg(Color::Gray),
                             ),
                         ]),
@@ -923,9 +1062,10 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
 
                 ListItem::new(item)
             })
-            .collect(),
-        None => vec![],
+            .collect()
     };
+
+    let filters = state.notification_filters();
 
     List::new(list_items)
         .highlight_style(FOCUSED_POST_STYLE)
@@ -935,9 +1075,12 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                 .style(Style::default())
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
-                    "Notifications (page {}, {} items)",
+                    "Notifications (page {}, {} groups) [reason:{} sender:{} read:{}]",
                     state.get_notifications_current_cursor_index() + 1,
-                    state.get_notifications().unwrap_or_default().len()
+                    notifications.len(),
+                    filters.reason.label(),
+                    filters.sender.label(),
+                    filters.read.label(),
                 ))
                 .border_type(BorderType::Plain),
         )

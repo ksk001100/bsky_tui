@@ -4,6 +4,7 @@ pub mod config;
 pub mod feed;
 pub mod images;
 pub mod moderation;
+pub mod notifications;
 pub mod profile;
 pub mod state;
 pub mod thread;
@@ -105,6 +106,7 @@ pub struct App {
     feed_catalog: Vec<feed::FeedDescriptor>,
     feed_viewer: Option<FeedViewer>,
     composer_preview: Option<bsky::LinkPreview>,
+    pub(crate) notification_settings: Option<notifications::NotificationSettings>,
     pub(crate) help_table_state: TableState,
     help_return_mode: state::Mode,
 }
@@ -128,6 +130,7 @@ impl App {
             feed_catalog: Vec::new(),
             feed_viewer: None,
             composer_preview: None,
+            notification_settings: None,
             help_table_state: TableState::default().with_selected(Some(0)),
             help_return_mode: state::Mode::Normal,
         }
@@ -161,6 +164,9 @@ impl App {
         if self.composer_preview.is_some() {
             return "any key close preview";
         }
+        if self.notification_settings.is_some() {
+            return "↑/↓ category   Space list   p push   i audience   v activity   Esc close";
+        }
         if self.state.is_help_mode() {
             return "↑/↓ move   PgUp/PgDn jump   Esc close";
         }
@@ -189,7 +195,9 @@ impl App {
             }
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => "↑/↓ select   Enter thread   n post   r reply   Tab switch   ? help",
-                Tab::Notifications => "↑/↓ select   Enter open   ←/→ page   Tab switch   ? help",
+                Tab::Notifications => {
+                    "↑/↓ select   1/2/3 filter   p settings   f follow   L like   a profile"
+                }
                 Tab::Search => {
                     "↑/↓ select   Enter thread   i image   / search   Tab switch   ? help"
                 }
@@ -249,6 +257,9 @@ impl App {
         if self.composer_preview.is_some() {
             self.composer_preview = None;
             return AppReturn::Continue;
+        }
+        if self.notification_settings.is_some() {
+            return self.notification_settings_action(key).await;
         }
         if self.feed_viewer.is_some() && !self.state.is_feed_search_mode() {
             return self.feed_viewer_action(key).await;
@@ -468,6 +479,46 @@ impl App {
                 self.state.set_input(Input::default());
                 AppReturn::Continue
             }
+            Key::Char('1') => {
+                self.state.cycle_notification_reason_filter();
+                AppReturn::Continue
+            }
+            Key::Char('2') => {
+                self.state.cycle_notification_sender_filter();
+                AppReturn::Continue
+            }
+            Key::Char('3') => {
+                self.state.cycle_notification_read_filter();
+                AppReturn::Continue
+            }
+            Key::Char('p') => {
+                if let Some(notification) = self.state.get_current_notification() {
+                    self.dispatch(IoEvent::LoadNotificationSettings(
+                        notification.author.did.clone(),
+                        notification.author.handle.to_string(),
+                    ))
+                    .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('f') => {
+                if let Some(notification) = self.state.get_current_notification() {
+                    self.dispatch(IoEvent::ToggleNotificationFollow(
+                        notification.author.did.clone(),
+                    ))
+                    .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('L') => {
+                if let Some(notification) = self.state.get_current_notification() {
+                    self.dispatch(IoEvent::LikeNotificationAuthor(
+                        notification.author.did.clone(),
+                    ))
+                    .await;
+                }
+                AppReturn::Continue
+            }
             Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                 self.state.move_notifications_scroll_down();
                 AppReturn::Continue
@@ -529,6 +580,46 @@ impl App {
             }
             _ => AppReturn::Continue,
         }
+    }
+
+    async fn notification_settings_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => self.notification_settings = None,
+            Key::Up | Key::Char('k') => {
+                if let Some(settings) = self.notification_settings.as_mut() {
+                    settings.previous();
+                }
+            }
+            Key::Down | Key::Char('j') => {
+                if let Some(settings) = self.notification_settings.as_mut() {
+                    settings.next();
+                }
+            }
+            Key::Char(' ') | Key::Char('p') | Key::Char('i') => {
+                if let Some(settings) = self.notification_settings.as_mut() {
+                    match key {
+                        Key::Char(' ') => settings.toggle_list(),
+                        Key::Char('p') => settings.toggle_push(),
+                        Key::Char('i') => settings.cycle_include(),
+                        _ => {}
+                    }
+                    let preferences = settings.preferences.clone();
+                    self.dispatch(IoEvent::SaveNotificationPreferences(Box::new(preferences)))
+                        .await;
+                }
+            }
+            Key::Char('v') => {
+                if let Some(settings) = self.notification_settings.as_mut() {
+                    settings.cycle_activity();
+                    if let Some((subject, _, activity)) = settings.activity_subject.clone() {
+                        self.dispatch(IoEvent::SaveActivitySubscription { subject, activity })
+                            .await;
+                    }
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
     }
 
     async fn search_action(&mut self, key: Key) -> AppReturn {
