@@ -46,6 +46,13 @@ impl IoAsyncHandler {
             IoEvent::LoadProfileSection(section) => self.do_load_profile_section(section).await,
             IoEvent::ToggleFollow => self.do_toggle_follow().await,
             IoEvent::LoadConnections(kind, actor) => self.do_load_connections(kind, actor).await,
+            IoEvent::Moderate(action) => self.do_moderate(action).await,
+            IoEvent::LoadFeedCatalog => self.do_load_feed_catalog(true).await,
+            IoEvent::SearchFeeds(query) => self.do_search_feeds(query).await,
+            IoEvent::SelectFeed(feed) => self.do_select_feed(feed).await,
+            IoEvent::ToggleSavedFeed(feed) => self.do_toggle_saved_feed(feed).await,
+            IoEvent::DeletePost(uri) => self.do_delete_post(uri).await,
+            IoEvent::PreviewLink(url) => self.do_preview_link(url).await,
         };
 
         let mut app = self.app.lock().await;
@@ -87,6 +94,15 @@ impl IoAsyncHandler {
                 moderation,
             );
         }
+        if self.do_load_feed_catalog(false).await.is_err() {
+            self.app.lock().await.set_feed_catalog(
+                vec![
+                    crate::app::feed::FeedDescriptor::following(),
+                    crate::app::feed::FeedDescriptor::discover(),
+                ],
+                false,
+            );
+        }
         self.do_load_timeline(TimelineEvent::Load).await
     }
 
@@ -114,7 +130,21 @@ impl IoAsyncHandler {
             return Ok(());
         }
 
-        let timeline = bsky::timeline(self.agent().await?.as_ref(), cursor.clone()).await?;
+        let active_feed = self.app.lock().await.state.get_active_feed();
+        let old_timeline = self
+            .app
+            .lock()
+            .await
+            .state
+            .get_timeline()
+            .unwrap_or_default();
+        let old_position = self.app.lock().await.state.get_tl_list_position();
+        let timeline = bsky::selected_feed_timeline(
+            self.agent().await?.as_ref(),
+            &active_feed,
+            cursor.clone(),
+        )
+        .await?;
         let moderation = self.app.lock().await.state.moderation();
         let image_urls = timeline
             .feed
@@ -133,11 +163,91 @@ impl IoAsyncHandler {
         );
 
         let mut app = self.app.lock().await;
-        app.state.set_timeline(Some(timeline.feed.clone()));
+        let position = if matches!(event, TimelineEvent::Reload) {
+            old_timeline
+                .get(old_position)
+                .and_then(|selected| {
+                    timeline
+                        .feed
+                        .iter()
+                        .position(|feed| feed.post.uri == selected.post.uri)
+                })
+                .unwrap_or(old_position)
+        } else {
+            0
+        };
+        let new_count = if matches!(event, TimelineEvent::Reload) && current == 0 {
+            count_new_posts(&old_timeline, &timeline.feed)
+        } else {
+            0
+        };
+        app.state
+            .set_timeline_preserving_position(Some(timeline.feed.clone()), position);
+        app.state.set_active_feed_new_count(new_count);
         app.state.set_cursors(page_cursors);
         app.state.set_tl_current_cursor_index(target);
-        app.state.move_tl_scroll_top();
         app.queue_images(image_urls);
+        Ok(())
+    }
+
+    async fn do_load_feed_catalog(&mut self, open: bool) -> Result<()> {
+        let catalog = bsky::feed_catalog(self.agent().await?.as_ref()).await?;
+        self.app.lock().await.set_feed_catalog(catalog, open);
+        Ok(())
+    }
+
+    async fn do_search_feeds(&mut self, query: String) -> Result<()> {
+        let results = bsky::search_feeds(self.agent().await?.as_ref(), query).await?;
+        self.app.lock().await.set_feed_search_results(results);
+        Ok(())
+    }
+
+    async fn do_select_feed(&mut self, feed: crate::app::feed::FeedDescriptor) -> Result<()> {
+        let needs_load = {
+            let mut app = self.app.lock().await;
+            app.state.activate_feed(feed);
+            app.state.get_timeline().is_none()
+        };
+        if needs_load {
+            self.do_load_timeline(TimelineEvent::Load).await?;
+        }
+        Ok(())
+    }
+
+    async fn do_toggle_saved_feed(&mut self, feed: crate::app::feed::FeedDescriptor) -> Result<()> {
+        bsky::toggle_saved_feed(self.agent().await?.as_ref(), &feed).await?;
+        self.do_load_feed_catalog(true).await
+    }
+
+    async fn do_delete_post(&mut self, uri: String) -> Result<()> {
+        self.agent().await?.delete_record(uri).await?;
+        let (mode, tab, section) = {
+            let app = self.app.lock().await;
+            (
+                app.state.get_mode(),
+                app.state.get_tab(),
+                app.state.get_profile().map(|profile| profile.section),
+            )
+        };
+        match mode {
+            Mode::Profile => {
+                if let Some(section) = section {
+                    self.do_load_profile_section(section).await?;
+                }
+            }
+            Mode::Thread => {
+                self.app.lock().await.state.close_thread();
+                self.do_load_timeline(TimelineEvent::Reload).await?;
+            }
+            _ if tab == Tab::Search => self.do_search(SearchEvent::Reload).await?,
+            _ => self.do_load_timeline(TimelineEvent::Reload).await?,
+        }
+        Ok(())
+    }
+
+    async fn do_preview_link(&mut self, url: String) -> Result<()> {
+        let preview = bsky::fetch_link_preview(&url).await?;
+        self.app.lock().await.set_composer_preview(preview);
         Ok(())
     }
 
@@ -290,16 +400,45 @@ impl IoAsyncHandler {
         Ok(())
     }
 
-    async fn do_send_post(&mut self) -> Result<()> {
-        let (did, text) = {
-            let app = self.app.lock().await;
-            (
-                app.state.get_did(),
-                app.state.get_input().value().to_string(),
-            )
+    async fn do_moderate(&mut self, action: crate::io::ModerationAction) -> Result<()> {
+        let actor_change = match &action {
+            crate::io::ModerationAction::MuteActor { did, .. }
+            | crate::io::ModerationAction::BlockActor { did, .. } => Some(did.clone()),
+            _ => None,
         };
-        bsky::validate_post_text(&text)?;
-        bsky::send_post(self.agent().await?.as_ref(), did, text, None).await?;
+        bsky::moderate(self.agent().await?.as_ref(), action).await?;
+        if let Some(did) = actor_change {
+            let (mode, profile) = {
+                let app = self.app.lock().await;
+                (app.state.get_mode(), app.state.get_profile())
+            };
+            if let Some(mut profile) =
+                profile.filter(|profile| mode == Mode::Profile && profile.details.did == did)
+            {
+                profile.details = bsky::profile(self.agent().await?.as_ref(), did.into()).await?;
+                self.app.lock().await.state.open_profile(profile);
+            } else {
+                if mode == Mode::Thread {
+                    self.app.lock().await.state.close_thread();
+                }
+                let tab = self.app.lock().await.state.get_tab();
+                if tab == Tab::Search {
+                    self.do_search(SearchEvent::Reload).await?;
+                } else {
+                    self.do_load_timeline(TimelineEvent::Reload).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn do_send_post(&mut self) -> Result<()> {
+        let text = {
+            let app = self.app.lock().await;
+            app.state.get_input().value().to_string()
+        };
+        let drafts = crate::app::composer::parse_drafts(&text)?;
+        bsky::send_drafts(self.agent().await?.as_ref(), drafts, None).await?;
         self.finish_composer().await;
         self.do_load_timeline(TimelineEvent::Reload).await
     }
@@ -438,26 +577,24 @@ impl IoAsyncHandler {
     }
 
     async fn do_reply(&mut self) -> Result<()> {
-        let (did, feed, text) = {
+        let (feed, text) = {
             let app = self.app.lock().await;
             (
-                app.state.get_did(),
                 app.state
                     .get_current_feed()
                     .ok_or_else(|| eyre!("no timeline post is selected"))?,
                 app.state.get_input().value().to_string(),
             )
         };
-        bsky::validate_post_text(&text)?;
         let parent = strong_ref::MainData {
             cid: feed.post.cid.clone(),
             uri: feed.post.uri.clone(),
         };
         let root = bsky::reply_root(&feed).unwrap_or_else(|| parent.clone());
-        bsky::send_post(
+        let drafts = crate::app::composer::parse_drafts(&text)?;
+        bsky::send_drafts(
             self.agent().await?.as_ref(),
-            did,
-            text,
+            drafts,
             Some(
                 ReplyRefData {
                     root: root.into(),
@@ -499,18 +636,17 @@ impl IoAsyncHandler {
     }
 
     async fn do_search_reply(&mut self) -> Result<()> {
-        let (did, post) = self.selected_search_post().await?;
+        let (_, post) = self.selected_search_post().await?;
         let text = self.app.lock().await.state.get_input().value().to_string();
-        bsky::validate_post_text(&text)?;
         let subject = strong_ref::MainData {
             cid: post.cid.clone(),
             uri: post.uri.clone(),
         };
         let root = bsky::reply_root_for_post(self.agent().await?.as_ref(), &post).await?;
-        bsky::send_post(
+        let drafts = crate::app::composer::parse_drafts(&text)?;
+        bsky::send_drafts(
             self.agent().await?.as_ref(),
-            did,
-            text,
+            drafts,
             Some(
                 ReplyRefData {
                     root: root.into(),
@@ -544,6 +680,18 @@ fn updated_cursors(
     cursors
 }
 
+fn count_new_posts(
+    old: &[atrium_api::app::bsky::feed::defs::FeedViewPost],
+    new: &[atrium_api::app::bsky::feed::defs::FeedViewPost],
+) -> usize {
+    let Some(first_old_uri) = old.first().map(|feed| feed.post.uri.as_str()) else {
+        return 0;
+    };
+    new.iter()
+        .take_while(|feed| feed.post.uri != first_old_uri)
+        .count()
+}
+
 fn operation_name(event: &IoEvent) -> &'static str {
     match event {
         IoEvent::Initialize => "Initialization",
@@ -559,6 +707,13 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::LoadProfile(_) | IoEvent::LoadProfileSection(_) => "Profile request",
         IoEvent::ToggleFollow => "Follow request",
         IoEvent::LoadConnections(_, _) => "Social graph request",
+        IoEvent::Moderate(_) => "Moderation request",
+        IoEvent::LoadFeedCatalog
+        | IoEvent::SearchFeeds(_)
+        | IoEvent::SelectFeed(_)
+        | IoEvent::ToggleSavedFeed(_) => "Feed request",
+        IoEvent::DeletePost(_) => "Delete post",
+        IoEvent::PreviewLink(_) => "Link preview",
         IoEvent::Search(_) => "Search",
     }
 }

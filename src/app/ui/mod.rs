@@ -121,6 +121,17 @@ where
         ));
     }
 
+    if app.state.is_feed_search_mode() {
+        let popup = draw::feed_search_input(app.state());
+        let area = layout::input_popup(size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+        f.set_cursor_position(Position::new(
+            area.x + 2 + app.state.get_input().visual_cursor() as u16,
+            area.y + 2,
+        ));
+    }
+
     if let Some((url, alt, index, total)) = app.current_image_viewer() {
         render_image_viewer(f, app, &url, &alt, index, total, size);
     }
@@ -141,8 +152,30 @@ where
         f.render_stateful_widget(popup, area, &mut list_state);
     }
 
+    if let Some((items, selected)) = app.current_feed_viewer() {
+        let popup = draw::feed_picker(items);
+        let area = layout::popup(85, 75, size);
+        let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(selected));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(popup, area, &mut list_state);
+    }
+
+    if let Some(preview) = app.composer_preview() {
+        let popup = draw::link_preview(preview);
+        let area = layout::popup(75, 45, size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+    }
+
     if let Some(message) = app.error() {
         let popup = draw::error(message);
+        let area = layout::popup(70, 30, size);
+        f.render_widget(Clear, area);
+        f.render_widget(popup, area);
+    }
+
+    if let Some(message) = app.confirmation_message() {
+        let popup = draw::confirmation(message);
         let area = layout::popup(70, 30, size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
@@ -156,7 +189,7 @@ fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10),
+            Constraint::Length(12),
             Constraint::Length(3),
             Constraint::Min(1),
         ])

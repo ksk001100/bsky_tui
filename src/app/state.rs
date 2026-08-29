@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use atrium_api::{
     app::bsky::{
@@ -11,6 +11,7 @@ use bsky_sdk::BskyAgent;
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
+use crate::app::feed::{FeedDescriptor, FeedSnapshot};
 use crate::app::moderation::ModerationPrefs;
 use crate::app::profile::{ProfileContent, ProfileSection, ProfileState};
 use crate::app::thread::ThreadEntry;
@@ -25,6 +26,7 @@ pub enum Mode {
     UserSearch,
     Thread,
     Profile,
+    FeedSearch,
 }
 
 impl fmt::Display for Mode {
@@ -38,6 +40,7 @@ impl fmt::Display for Mode {
             Mode::UserSearch => "User Search",
             Mode::Thread => "Thread",
             Mode::Profile => "Profile",
+            Mode::FeedSearch => "Feed Search",
         };
         write!(f, "{}", str)
     }
@@ -94,6 +97,8 @@ pub enum AppState {
         thread_list_state: ListState,
         thread_list_position: usize,
         profile: Option<ProfileState>,
+        active_feed: FeedDescriptor,
+        feed_snapshots: HashMap<String, FeedSnapshot>,
     },
 }
 
@@ -133,6 +138,8 @@ impl AppState {
             thread_list_state: ListState::default(),
             thread_list_position: 0,
             profile: None,
+            active_feed: FeedDescriptor::following(),
+            feed_snapshots: HashMap::new(),
         }
     }
 
@@ -558,6 +565,104 @@ impl AppState {
         }
     }
 
+    pub fn set_timeline_preserving_position(
+        &mut self,
+        timeline_value: Option<Vec<FeedViewPost>>,
+        position: usize,
+    ) {
+        if let Self::Initialized {
+            timeline,
+            tl_list_position,
+            tl_list_state,
+            ..
+        } = self
+        {
+            let length = timeline_value.as_ref().map_or(0, Vec::len);
+            *timeline = timeline_value;
+            *tl_list_position = position.min(length.saturating_sub(1));
+            tl_list_state.select((length > 0).then_some(*tl_list_position));
+        }
+    }
+
+    pub fn get_active_feed(&self) -> FeedDescriptor {
+        if let Self::Initialized { active_feed, .. } = self {
+            active_feed.clone()
+        } else {
+            FeedDescriptor::following()
+        }
+    }
+
+    pub fn activate_feed(&mut self, descriptor: FeedDescriptor) {
+        if let Self::Initialized {
+            timeline,
+            tl_list_position,
+            tl_list_state,
+            tl_current_cursor_index,
+            cursors,
+            active_feed,
+            feed_snapshots,
+            ..
+        } = self
+        {
+            feed_snapshots.insert(
+                active_feed.id.clone(),
+                FeedSnapshot {
+                    timeline: timeline.clone(),
+                    position: *tl_list_position,
+                    page: *tl_current_cursor_index,
+                    cursors: cursors.clone(),
+                    new_count: feed_snapshots
+                        .get(&active_feed.id)
+                        .map_or(0, |snapshot| snapshot.new_count),
+                },
+            );
+            let snapshot = feed_snapshots
+                .get(&descriptor.id)
+                .cloned()
+                .unwrap_or_default();
+            *active_feed = descriptor;
+            *timeline = snapshot.timeline;
+            *tl_list_position = snapshot.position;
+            *tl_current_cursor_index = snapshot.page;
+            *cursors = snapshot.cursors;
+            tl_list_state.select(
+                timeline
+                    .as_ref()
+                    .is_some_and(|items| !items.is_empty())
+                    .then_some(*tl_list_position),
+            );
+        }
+    }
+
+    pub fn set_active_feed_new_count(&mut self, count: usize) {
+        if let Self::Initialized {
+            active_feed,
+            feed_snapshots,
+            ..
+        } = self
+        {
+            feed_snapshots
+                .entry(active_feed.id.clone())
+                .or_default()
+                .new_count = count;
+        }
+    }
+
+    pub fn get_active_feed_new_count(&self) -> usize {
+        if let Self::Initialized {
+            active_feed,
+            feed_snapshots,
+            ..
+        } = self
+        {
+            feed_snapshots
+                .get(&active_feed.id)
+                .map_or(0, |snapshot| snapshot.new_count)
+        } else {
+            0
+        }
+    }
+
     pub fn get_timeline(&self) -> Option<Vec<FeedViewPost>> {
         if let Self::Initialized { timeline, .. } = self {
             timeline.clone()
@@ -686,6 +791,16 @@ impl AppState {
             self,
             Self::Initialized {
                 mode: Mode::UserSearch,
+                ..
+            }
+        )
+    }
+
+    pub fn is_feed_search_mode(&self) -> bool {
+        matches!(
+            self,
+            Self::Initialized {
+                mode: Mode::FeedSearch,
                 ..
             }
         )

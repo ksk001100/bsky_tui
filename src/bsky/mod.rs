@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, num::NonZeroU64};
 
 use eyre::{bail, Result};
 use unicode_segmentation::UnicodeSegmentation;
@@ -6,19 +6,27 @@ use unicode_segmentation::UnicodeSegmentation;
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
-        actor::{get_preferences, get_profile, search_actors},
-        embed::{record::ViewRecordRefs, record_with_media::ViewMediaRefs},
+        actor::{
+            defs::PreferencesItem, get_preferences, get_profile, put_preferences, search_actors,
+        },
+        embed::{
+            defs as embed_defs, external, images, record as embed_record, record::ViewRecordRefs,
+            record_with_media, record_with_media::ViewMediaRefs,
+        },
         feed::{
-            defs, get_actor_feeds, get_actor_likes, get_author_feed, get_likes, get_post_thread,
-            get_quotes, get_reposted_by, get_timeline, post, search_posts,
+            defs, get_actor_feeds, get_actor_likes, get_author_feed, get_feed, get_feed_generators,
+            get_likes, get_post_thread, get_quotes, get_reposted_by, get_timeline, post,
+            search_posts, threadgate,
         },
         graph::{
-            follow, get_actor_starter_packs, get_followers, get_follows, get_lists, starterpack,
+            block, follow, get_actor_starter_packs, get_followers, get_follows, get_lists,
+            mute_actor, starterpack, unmute_actor,
         },
         notification,
         richtext::facet,
+        unspecced::get_popular_feed_generators,
     },
-    com::atproto::{repo, server},
+    com::atproto::{admin::defs::RepoRefData, label::defs as label_defs, moderation, repo, server},
     record::KnownRecord,
     types::{
         string::{AtIdentifier, Cid, Datetime, Did, Handle, Nsid, RecordKey},
@@ -29,9 +37,13 @@ use atrium_xrpc_client::reqwest::ReqwestClient;
 
 use bsky_sdk::api::types::TryFromUnknown;
 use bsky_sdk::BskyAgent;
+use image::GenericImageView;
 
+use crate::app::composer::{PostDraft, ReplyPolicy, ReplyRule};
+use crate::app::feed::{FeedDescriptor, FeedKind};
 use crate::app::moderation::ModerationPrefs;
 use crate::app::profile::{ProfileContent, ProfileListItem, ProfileSection};
+use crate::io::ModerationAction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PostFacet {
@@ -49,6 +61,21 @@ pub struct InteractionItem {
 }
 
 pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
+
+const DISCOVER_FEED: &str =
+    "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot";
+
+pub struct TimelinePage {
+    pub feed: Vec<defs::FeedViewPost>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LinkPreview {
+    pub url: String,
+    pub title: String,
+    pub description: String,
+}
 
 pub async fn agent_with_session(
     service_url: &str,
@@ -156,6 +183,207 @@ pub async fn timeline(agent: &BskyAgent, cursor: Option<String>) -> Result<get_t
         .await?;
 
     Ok(timeline)
+}
+
+pub async fn selected_feed_timeline(
+    agent: &BskyAgent,
+    descriptor: &FeedDescriptor,
+    cursor: Option<String>,
+) -> Result<TimelinePage> {
+    match &descriptor.kind {
+        FeedKind::Following => {
+            let output = timeline(agent, cursor).await?;
+            Ok(TimelinePage {
+                feed: output.feed.clone(),
+                cursor: output.cursor.clone(),
+            })
+        }
+        FeedKind::Custom(uri) => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .feed
+                .get_feed(
+                    get_feed::ParametersData {
+                        cursor,
+                        feed: uri.clone(),
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(TimelinePage {
+                feed: output.feed.clone(),
+                cursor: output.cursor.clone(),
+            })
+        }
+    }
+}
+
+pub async fn feed_catalog(agent: &BskyAgent) -> Result<Vec<FeedDescriptor>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .actor
+        .get_preferences(get_preferences::ParametersData {}.into())
+        .await?;
+    let saved = saved_feed_items(&output.preferences);
+    let mut uris = vec![DISCOVER_FEED.to_owned()];
+    uris.extend(saved.iter().map(|item| item.value.clone()));
+    uris.sort();
+    uris.dedup();
+    let generators = agent
+        .api
+        .app
+        .bsky
+        .feed
+        .get_feed_generators(get_feed_generators::ParametersData { feeds: uris }.into())
+        .await?
+        .feeds
+        .clone();
+    let mut catalog = vec![FeedDescriptor::following()];
+    let mut descriptors = generators
+        .iter()
+        .map(|generator| {
+            let saved_item = saved.iter().find(|item| item.value == generator.uri);
+            FeedDescriptor {
+                id: generator.uri.clone(),
+                name: if generator.uri == DISCOVER_FEED {
+                    "Discover".to_owned()
+                } else {
+                    generator.display_name.clone()
+                },
+                description: generator.description.clone().unwrap_or_default(),
+                kind: FeedKind::Custom(generator.uri.clone()),
+                saved: saved_item.is_some(),
+                pinned: saved_item.is_some_and(|item| item.pinned),
+            }
+        })
+        .collect::<Vec<_>>();
+    if !descriptors.iter().any(|feed| feed.id == DISCOVER_FEED) {
+        descriptors.push(FeedDescriptor {
+            id: DISCOVER_FEED.to_owned(),
+            name: "Discover".to_owned(),
+            description: "Popular posts selected by Bluesky".to_owned(),
+            kind: FeedKind::Custom(DISCOVER_FEED.to_owned()),
+            saved: saved.iter().any(|item| item.value == DISCOVER_FEED),
+            pinned: saved
+                .iter()
+                .find(|item| item.value == DISCOVER_FEED)
+                .is_some_and(|item| item.pinned),
+        });
+    }
+    descriptors.sort_by_key(|feed| {
+        let saved_index = saved
+            .iter()
+            .position(|item| item.value == feed.id)
+            .unwrap_or(usize::MAX);
+        (!feed.pinned, saved_index, feed.name.clone())
+    });
+    catalog.extend(descriptors);
+    Ok(catalog)
+}
+
+pub async fn search_feeds(agent: &BskyAgent, query: String) -> Result<Vec<FeedDescriptor>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .unspecced
+        .get_popular_feed_generators(
+            get_popular_feed_generators::ParametersData {
+                cursor: None,
+                limit: None,
+                query: Some(query),
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .feeds
+        .iter()
+        .map(|generator| FeedDescriptor {
+            id: generator.uri.clone(),
+            name: generator.display_name.clone(),
+            description: generator.description.clone().unwrap_or_default(),
+            kind: FeedKind::Custom(generator.uri.clone()),
+            saved: false,
+            pinned: false,
+        })
+        .collect())
+}
+
+pub async fn toggle_saved_feed(agent: &BskyAgent, descriptor: &FeedDescriptor) -> Result<()> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .actor
+        .get_preferences(get_preferences::ParametersData {}.into())
+        .await?;
+    let mut preferences = output.preferences.clone();
+    let mut found_v2 = false;
+    for preference in &mut preferences {
+        if let Union::Refs(PreferencesItem::SavedFeedsPrefV2(saved)) = preference {
+            found_v2 = true;
+            if let Some(index) = saved
+                .items
+                .iter()
+                .position(|item| item.value == descriptor.id)
+            {
+                saved.items.remove(index);
+            } else {
+                saved.items.push(
+                    atrium_api::app::bsky::actor::defs::SavedFeedData {
+                        id: descriptor.id.clone(),
+                        pinned: false,
+                        r#type: "feed".to_owned(),
+                        value: descriptor.id.clone(),
+                    }
+                    .into(),
+                );
+            }
+        }
+    }
+    if !found_v2 {
+        preferences.push(Union::Refs(PreferencesItem::SavedFeedsPrefV2(Box::new(
+            atrium_api::app::bsky::actor::defs::SavedFeedsPrefV2Data {
+                items: vec![atrium_api::app::bsky::actor::defs::SavedFeedData {
+                    id: descriptor.id.clone(),
+                    pinned: false,
+                    r#type: "feed".to_owned(),
+                    value: descriptor.id.clone(),
+                }
+                .into()],
+            }
+            .into(),
+        ))));
+    }
+    agent
+        .api
+        .app
+        .bsky
+        .actor
+        .put_preferences(put_preferences::InputData { preferences }.into())
+        .await?;
+    Ok(())
+}
+
+fn saved_feed_items(
+    preferences: &[atrium_api::types::Union<PreferencesItem>],
+) -> Vec<atrium_api::app::bsky::actor::defs::SavedFeed> {
+    preferences
+        .iter()
+        .find_map(|preference| match preference {
+            Union::Refs(PreferencesItem::SavedFeedsPrefV2(saved)) => Some(saved.items.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|item| item.r#type == "feed")
+        .collect()
 }
 
 pub async fn post_thread(agent: &BskyAgent, uri: String) -> Result<get_post_thread::Output> {
@@ -450,6 +678,85 @@ pub async fn toggle_follow(
             .await?;
         Ok(Some(output.uri.clone()))
     }
+}
+
+pub async fn moderate(agent: &BskyAgent, action: ModerationAction) -> Result<()> {
+    match action {
+        ModerationAction::MuteActor { did, muted } => {
+            if muted {
+                agent
+                    .api
+                    .app
+                    .bsky
+                    .graph
+                    .unmute_actor(unmute_actor::InputData { actor: did.into() }.into())
+                    .await?;
+            } else {
+                agent
+                    .api
+                    .app
+                    .bsky
+                    .graph
+                    .mute_actor(mute_actor::InputData { actor: did.into() }.into())
+                    .await?;
+            }
+        }
+        ModerationAction::BlockActor { did, blocking_uri } => {
+            if let Some(uri) = blocking_uri {
+                agent.delete_record(uri).await?;
+            } else {
+                agent
+                    .create_record(block::RecordData {
+                        created_at: Datetime::now(),
+                        subject: did,
+                    })
+                    .await?;
+            }
+        }
+        ModerationAction::ReportActor(did) => {
+            agent
+                .api
+                .com
+                .atproto
+                .moderation
+                .create_report(
+                    moderation::create_report::InputData {
+                        mod_tool: None,
+                        reason: Some("Reported from bsky_tui".to_owned()),
+                        reason_type: moderation::defs::REASON_OTHER.to_owned(),
+                        subject: Union::Refs(
+                            moderation::create_report::InputSubjectRefs::ComAtprotoAdminDefsRepoRef(
+                                Box::new(RepoRefData { did }.into()),
+                            ),
+                        ),
+                    }
+                    .into(),
+                )
+                .await?;
+        }
+        ModerationAction::ReportPost { uri, cid } => {
+            agent
+                .api
+                .com
+                .atproto
+                .moderation
+                .create_report(
+                    moderation::create_report::InputData {
+                        mod_tool: None,
+                        reason: Some("Reported from bsky_tui".to_owned()),
+                        reason_type: moderation::defs::REASON_OTHER.to_owned(),
+                        subject: Union::Refs(
+                            moderation::create_report::InputSubjectRefs::ComAtprotoRepoStrongRefMain(
+                                Box::new(repo::strong_ref::MainData { uri, cid }.into()),
+                            ),
+                        ),
+                    }
+                    .into(),
+                )
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 fn at_uri_parts(uri: &str) -> Option<(&str, &str)> {
@@ -864,6 +1171,304 @@ pub async fn send_post(
         .await?;
 
     Ok(())
+}
+
+pub async fn send_drafts(
+    agent: &BskyAgent,
+    drafts: Vec<PostDraft>,
+    initial_reply: Option<post::ReplyRef>,
+) -> Result<Vec<repo::strong_ref::MainData>> {
+    for draft in &drafts {
+        if !draft.text.trim().is_empty() {
+            validate_post_text(&draft.text)?;
+        }
+    }
+    let mut created: Vec<(repo::strong_ref::MainData, Option<String>)> = Vec::new();
+    let mut root = initial_reply
+        .as_ref()
+        .map(|reply| repo::strong_ref::MainData {
+            uri: reply.root.uri.clone(),
+            cid: reply.root.cid.clone(),
+        });
+    let mut parent = initial_reply
+        .as_ref()
+        .map(|reply| repo::strong_ref::MainData {
+            uri: reply.parent.uri.clone(),
+            cid: reply.parent.cid.clone(),
+        });
+
+    for draft in drafts {
+        let reply = parent.as_ref().map(|current_parent| {
+            post::ReplyRefData {
+                parent: current_parent.clone().into(),
+                root: root
+                    .clone()
+                    .unwrap_or_else(|| current_parent.clone())
+                    .into(),
+            }
+            .into()
+        });
+        let (reference, gate_uri) = match create_draft_record(agent, &draft, reply).await {
+            Ok(created) => created,
+            Err(error) => {
+                rollback_created_posts(agent, &created).await;
+                return Err(error);
+            }
+        };
+        if root.is_none() {
+            root = Some(reference.clone());
+        }
+        parent = Some(reference.clone());
+        created.push((reference, gate_uri));
+    }
+    Ok(created.into_iter().map(|(post, _)| post).collect())
+}
+
+async fn create_draft_record(
+    agent: &BskyAgent,
+    draft: &PostDraft,
+    reply: Option<post::ReplyRef>,
+) -> Result<(repo::strong_ref::MainData, Option<String>)> {
+    let rich_text = bsky_sdk::rich_text::RichText::new_with_detect_facets(&draft.text).await?;
+    let embed = build_embed(agent, draft).await?;
+    let labels = (!draft.labels.is_empty()).then(|| {
+        Union::Refs(post::RecordLabelsRefs::ComAtprotoLabelDefsSelfLabels(
+            Box::new(
+                label_defs::SelfLabelsData {
+                    values: draft
+                        .labels
+                        .iter()
+                        .map(|label| label_defs::SelfLabelData { val: label.clone() }.into())
+                        .collect(),
+                }
+                .into(),
+            ),
+        ))
+    });
+    let output = agent
+        .create_record(post::RecordData {
+            created_at: Datetime::now(),
+            embed,
+            entities: None,
+            facets: rich_text.facets,
+            langs: draft.langs.clone(),
+            labels,
+            tags: None,
+            reply,
+            text: draft.text.clone(),
+        })
+        .await?;
+    let reference = repo::strong_ref::MainData {
+        uri: output.uri.clone(),
+        cid: output.cid.clone(),
+    };
+    match create_thread_gate(agent, &reference.uri, &draft.reply_policy).await {
+        Ok(gate_uri) => Ok((reference, gate_uri)),
+        Err(error) => {
+            let _ = agent.delete_record(&reference.uri).await;
+            Err(error)
+        }
+    }
+}
+
+async fn rollback_created_posts(
+    agent: &BskyAgent,
+    created: &[(repo::strong_ref::MainData, Option<String>)],
+) {
+    for (post, gate) in created.iter().rev() {
+        if let Some(gate) = gate {
+            let _ = agent.delete_record(gate).await;
+        }
+        let _ = agent.delete_record(&post.uri).await;
+    }
+}
+
+async fn build_embed(
+    agent: &BskyAgent,
+    draft: &PostDraft,
+) -> Result<Option<Union<post::RecordEmbedRefs>>> {
+    let media = if !draft.images.is_empty() {
+        Some(Union::Refs(
+            record_with_media::MainMediaRefs::AppBskyEmbedImagesMain(Box::new(
+                upload_images(agent, &draft.images).await?,
+            )),
+        ))
+    } else if let Some(url) = &draft.link {
+        Some(Union::Refs(
+            record_with_media::MainMediaRefs::AppBskyEmbedExternalMain(Box::new(
+                external_preview(url).await?,
+            )),
+        ))
+    } else {
+        None
+    };
+    let quote = draft.quote.as_ref().map(|reference| {
+        embed_record::MainData {
+            record: reference.clone().into(),
+        }
+        .into()
+    });
+
+    Ok(match (media, quote) {
+        (Some(media), Some(record)) => Some(Union::Refs(
+            post::RecordEmbedRefs::AppBskyEmbedRecordWithMediaMain(Box::new(
+                record_with_media::MainData { media, record }.into(),
+            )),
+        )),
+        (
+            Some(Union::Refs(record_with_media::MainMediaRefs::AppBskyEmbedImagesMain(images))),
+            None,
+        ) => Some(Union::Refs(post::RecordEmbedRefs::AppBskyEmbedImagesMain(
+            images,
+        ))),
+        (
+            Some(Union::Refs(record_with_media::MainMediaRefs::AppBskyEmbedExternalMain(external))),
+            None,
+        ) => Some(Union::Refs(
+            post::RecordEmbedRefs::AppBskyEmbedExternalMain(external),
+        )),
+        (Some(Union::Refs(_)), None) | (Some(Union::Unknown(_)), None) => {
+            bail!("unsupported composer media")
+        }
+        (None, Some(record)) => Some(Union::Refs(post::RecordEmbedRefs::AppBskyEmbedRecordMain(
+            Box::new(record),
+        ))),
+        (None, None) => None,
+    })
+}
+
+async fn upload_images(
+    agent: &BskyAgent,
+    specs: &[crate::app::composer::ImageSpec],
+) -> Result<images::Main> {
+    let mut uploaded = Vec::new();
+    for spec in specs {
+        let bytes = tokio::fs::read(&spec.path).await?;
+        if bytes.len() > 1_000_000 {
+            bail!("image {} exceeds the 1 MB upload limit", spec.path);
+        }
+        let decoded = image::load_from_memory(&bytes)?;
+        let (width, height) = decoded.dimensions();
+        let width = NonZeroU64::new(width.into()).ok_or_else(|| eyre::eyre!("zero-width image"))?;
+        let height =
+            NonZeroU64::new(height.into()).ok_or_else(|| eyre::eyre!("zero-height image"))?;
+        let blob = agent
+            .api
+            .com
+            .atproto
+            .repo
+            .upload_blob(bytes)
+            .await?
+            .blob
+            .clone();
+        uploaded.push(
+            images::ImageData {
+                alt: spec.alt.clone(),
+                aspect_ratio: Some(embed_defs::AspectRatioData { width, height }.into()),
+                image: blob,
+            }
+            .into(),
+        );
+    }
+    Ok(images::MainData { images: uploaded }.into())
+}
+
+async fn external_preview(url: &str) -> Result<external::Main> {
+    let preview = fetch_link_preview(url).await?;
+    Ok(external::MainData {
+        external: external::ExternalData {
+            description: preview.description,
+            thumb: None,
+            title: preview.title,
+            uri: preview.url,
+        }
+        .into(),
+    }
+    .into())
+}
+
+pub async fn fetch_link_preview(url: &str) -> Result<LinkPreview> {
+    let parsed = reqwest::Url::parse(url)?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        bail!("external card URL must use http or https");
+    }
+    let response = reqwest::get(parsed.clone()).await?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > 2_000_000)
+    {
+        bail!("external preview page is too large");
+    }
+    let bytes = response.bytes().await?;
+    if bytes.len() > 2_000_000 {
+        bail!("external preview page is too large");
+    }
+    let html = String::from_utf8_lossy(&bytes);
+    let title = html_tag_content(&html, "title").unwrap_or_else(|| parsed.to_string());
+    let description = html_meta_content(&html, "description").unwrap_or_default();
+    Ok(LinkPreview {
+        url: parsed.into(),
+        title,
+        description,
+    })
+}
+
+fn html_tag_content(html: &str, tag: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let start = lower.find(&format!("<{tag}"))?;
+    let content_start = lower[start..].find('>')? + start + 1;
+    let end = lower[content_start..].find(&format!("</{tag}>"))? + content_start;
+    Some(html[content_start..end].trim().to_owned())
+}
+
+fn html_meta_content(html: &str, name: &str) -> Option<String> {
+    html.split('<').find_map(|fragment| {
+        let lower = fragment.to_ascii_lowercase();
+        if !lower.starts_with("meta") || !lower.contains(&format!("name=\"{name}\"")) {
+            return None;
+        }
+        let content = lower.find("content=\"")? + "content=\"".len();
+        let end = fragment[content..].find('"')? + content;
+        Some(fragment[content..end].to_owned())
+    })
+}
+
+async fn create_thread_gate(
+    agent: &BskyAgent,
+    post_uri: &str,
+    policy: &ReplyPolicy,
+) -> Result<Option<String>> {
+    let allow = match policy {
+        ReplyPolicy::Everyone => return Ok(None),
+        ReplyPolicy::Nobody => Some(Vec::new()),
+        ReplyPolicy::Rules(rules) => Some(
+            rules
+                .iter()
+                .map(|rule| match rule {
+                    ReplyRule::Followers => Union::Refs(threadgate::RecordAllowItem::FollowerRule(
+                        Box::new(threadgate::FollowerRuleData {}.into()),
+                    )),
+                    ReplyRule::Following => {
+                        Union::Refs(threadgate::RecordAllowItem::FollowingRule(Box::new(
+                            threadgate::FollowingRuleData {}.into(),
+                        )))
+                    }
+                    ReplyRule::Mentioned => Union::Refs(threadgate::RecordAllowItem::MentionRule(
+                        Box::new(threadgate::MentionRuleData {}.into()),
+                    )),
+                })
+                .collect(),
+        ),
+    };
+    let output = agent
+        .create_record(threadgate::RecordData {
+            allow,
+            created_at: Datetime::now(),
+            hidden_replies: None,
+            post: post_uri.to_owned(),
+        })
+        .await?;
+    Ok(Some(output.uri.clone()))
 }
 
 pub async fn notifications(

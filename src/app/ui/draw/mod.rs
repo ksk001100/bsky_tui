@@ -14,6 +14,7 @@ use unicode_width::UnicodeWidthChar;
 
 use crate::io::InteractionKind;
 use crate::{
+    app::feed::FeedDescriptor,
     app::moderation::{ModerationDecision, ModerationPrefs},
     app::profile::{ProfileContent, ProfileSection, ProfileState},
     app::state::{AppState, Tab},
@@ -76,6 +77,40 @@ pub fn error<'a>(message: &str) -> Paragraph<'a> {
     )
 }
 
+pub fn confirmation(message: String) -> Paragraph<'static> {
+    Paragraph::new(format!(
+        "{message}\n\nPress y/Enter to confirm, n/Esc to cancel."
+    ))
+    .wrap(ratatui::widgets::Wrap { trim: true })
+    .block(
+        Block::default()
+            .title(" Confirm moderation action ")
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
+}
+
+pub fn link_preview(preview: bsky::LinkPreview) -> Paragraph<'static> {
+    Paragraph::new(vec![
+        Line::from(Span::styled(
+            preview.title,
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(preview.description),
+        Line::from(Span::styled(preview.url, Style::default().fg(Color::Gray))),
+        Line::from(""),
+        Line::from("Press any key to close preview"),
+    ])
+    .wrap(ratatui::widgets::Wrap { trim: true })
+    .block(
+        Block::default()
+            .title(" Link card preview ")
+            .borders(Borders::ALL),
+    )
+}
+
 pub fn facets(facets: Vec<bsky::PostFacet>) -> List<'static> {
     let items = facets
         .into_iter()
@@ -125,6 +160,36 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
     )
 }
 
+pub fn feed_picker(items: Vec<FeedDescriptor>) -> List<'static> {
+    let rows = if items.is_empty() {
+        vec![ListItem::new("(No feeds found)")]
+    } else {
+        items
+            .into_iter()
+            .map(|feed| {
+                let flags = format!(
+                    "{}{}",
+                    if feed.pinned { "📌 " } else { "" },
+                    if feed.saved { "★ " } else { "" }
+                );
+                ListItem::new(vec![
+                    Line::from(Span::styled(
+                        format!("{flags}{}", feed.name),
+                        Style::default().fg(Color::LightCyan),
+                    )),
+                    Line::from(feed.description),
+                ])
+            })
+            .collect()
+    };
+    List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
+        Block::default()
+            .title(" Feeds — Enter select, / search, s save/unsave, Esc close ")
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
+}
+
 pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
     let details = &profile.details;
     let display_name = details.display_name.clone().unwrap_or_default();
@@ -144,12 +209,31 @@ pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
         .map(|labels| {
             labels
                 .iter()
-                .map(|label| label.val.clone())
+                .map(|label| format!("{}:{}", label.src.as_str(), label.val))
                 .collect::<Vec<_>>()
                 .join(", ")
         })
         .filter(|labels| !labels.is_empty())
         .unwrap_or_else(|| "none".to_owned());
+    let verification = details
+        .verification
+        .as_ref()
+        .map(|verification| {
+            let issuers = verification
+                .verifications
+                .iter()
+                .filter(|item| item.is_valid)
+                .map(|item| item.issuer.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Verification: account={} verifier={} issuers={}",
+                verification.verified_status,
+                verification.trusted_verifier_status,
+                if issuers.is_empty() { "none" } else { &issuers }
+            )
+        })
+        .unwrap_or_else(|| "Verification: none".to_owned());
     Paragraph::new(vec![
         Line::from(Span::styled(
             display_name,
@@ -167,6 +251,7 @@ pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
         )),
         Line::from(relationship),
         Line::from(format!("Labels: {labels}")),
+        Line::from(verification),
         Line::from(details.description.clone().unwrap_or_default()),
     ])
     .wrap(ratatui::widgets::Wrap { trim: true })
@@ -253,6 +338,12 @@ const HELP_ROWS: &[(&str, &str, &str, &str)] = &[
     ("", "Home/Notifications", "N", "Reply selected post popup"),
     (
         "",
+        "Home",
+        "c",
+        "Select Following, Discover, or custom feed",
+    ),
+    (
+        "",
         "Home/Notifications/Search",
         "j, Ctrl+n, Down",
         "Select next post",
@@ -281,8 +372,17 @@ const HELP_ROWS: &[(&str, &str, &str, &str)] = &[
         "L / R / Q",
         "Show Likes / Reposts / Quotes",
     ),
+    ("", "Home/Search/Thread", "X", "Quote selected post"),
+    (
+        "",
+        "Home/Search/Thread",
+        "m / B / !",
+        "Mute / block / report",
+    ),
+    ("", "Home/Search/Thread", "D", "Delete your selected post"),
     ("Profile", "", "h/l, Left/Right", "Switch profile section"),
     ("", "", "F", "Follow or unfollow profile"),
+    ("", "", "m / B / !", "Mute / block / report profile"),
     ("", "", "g / G", "Show followers / following"),
     ("", "", "Enter, b", "Open selected profile item"),
     (
@@ -319,6 +419,15 @@ const HELP_ROWS: &[(&str, &str, &str, &str)] = &[
     ),
     ("Post/Reply/Search", "", "Esc", "Return to normal mode"),
     ("", "", "Ctrl+s / Enter", "Send post/reply / insert newline"),
+    ("", "", "Ctrl+v", "Preview !link card"),
+    ("", "", "!image / !link", "Add image or external card"),
+    ("", "", "!lang / !label", "Set language or content warning"),
+    (
+        "",
+        "",
+        "!replies / ---",
+        "Set reply controls / split thread",
+    ),
     ("", "", "Left, Ctrl+b", "Move cursor left"),
     ("", "", "Right, Ctrl+f", "Move cursor right"),
     ("", "", "Ctrl+a", "Move cursor to start of line"),
@@ -402,9 +511,14 @@ pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
         state.moderation(),
         width,
         format!(
-            "Home ({}: {})",
+            "{} (page {}, {} posts{})",
+            state.get_active_feed().name,
             state.get_tl_current_cursor_index() + 1,
-            state.get_timeline().unwrap_or_default().len()
+            state.get_timeline().unwrap_or_default().len(),
+            match state.get_active_feed_new_count() {
+                0 => String::new(),
+                count => format!(", {count} new"),
+            }
         ),
     )
 }
@@ -902,6 +1016,9 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
 pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
     let text = state.get_input().value().to_string();
     let remaining = 300_i64 - text.graphemes(true).count() as i64;
+    let summary = crate::app::composer::parse_drafts(&text)
+        .map(|drafts| crate::app::composer::summary(&drafts))
+        .unwrap_or_else(|_| "metadata incomplete".to_owned());
     Paragraph::new(text)
         .style(Style::default().fg(Color::White).bg(Color::Black))
         .alignment(Alignment::Left)
@@ -909,7 +1026,9 @@ pub fn post_input<'a>(state: &AppState) -> Paragraph<'a> {
             Block::default()
                 .style(Style::default().fg(Color::White))
                 .borders(Borders::ALL)
-                .title(format!("New post — {remaining} remaining (Ctrl+s to send)"))
+                .title(format!(
+                    "New post — {remaining} remaining — {summary} — Ctrl+s send / Ctrl+v preview"
+                ))
                 .padding(Padding::new(1, 1, 1, 1)),
         )
 }
@@ -920,6 +1039,10 @@ pub fn search_input<'a>(state: &AppState) -> Paragraph<'a> {
 
 pub fn user_search_input<'a>(state: &AppState) -> Paragraph<'a> {
     search_input_with_title(state, "Search users")
+}
+
+pub fn feed_search_input<'a>(state: &AppState) -> Paragraph<'a> {
+    search_input_with_title(state, "Search custom feeds")
 }
 
 fn search_input_with_title<'a>(state: &AppState, title: &'a str) -> Paragraph<'a> {

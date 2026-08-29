@@ -16,6 +16,10 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 - Search for users
 - View profiles, profile posts/replies/media/likes, feeds, lists, and starter packs
 - Follow/unfollow users and browse followers/following
+- Mute, block, and report profiles or posts with confirmation
+- Switch between Following, Discover, saved, pinned, and searched custom feeds
+- Create image, link-card, quote, and multi-post thread posts
+- Set post languages, content warnings, and reply controls
 - View post threads and reply trees
 - View quote posts, external link cards, and video/GIF metadata
 - Open URLs, mentions, hashtags, external links, and videos
@@ -114,6 +118,9 @@ text-cell rendering mode.
 - `?`: Show help
 - `u`: Search for users
 - `p`: Open the selected post author profile (where available)
+- `m`, `B`, `!`: Mute/unmute, block/unblock, or report (with confirmation)
+- `D`: Delete the selected post when it belongs to you (with confirmation)
+- `X`: Quote the selected post
 
 ### Home Tab
 - `j`, `Down`, `Ctrl+n`: Scroll down
@@ -121,6 +128,7 @@ text-cell rendering mode.
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
 - `r`: Reload timeline
+- `c`: Open the feed selector
 - `n`: New post
 - `N`: Reply to selected post
 - `Ctrl+l`: Like/unlike
@@ -173,6 +181,7 @@ text-cell rendering mode.
 - `j`, `Down`, `Ctrl+n`: Move down
 - `k`, `Up`, `Ctrl+p`: Move up
 - `F`: Follow/unfollow the profile
+- `m`, `B`, `!`: Mute/unmute, block/unblock, or report the profile
 - `g`: Show followers
 - `G`: Show following
 - `p`: Open the selected post author profile
@@ -186,6 +195,14 @@ text-cell rendering mode.
 - `Enter`, `b`: Open the selected item in browser
 - `q`, `Esc`: Close the list
 
+### Feed Selector
+- `j`, `Down`: Move down
+- `k`, `Up`: Move up
+- `Enter`: Switch to the selected feed
+- `/`: Search custom feeds
+- `s`: Save or unsave a custom feed
+- `q`, `Esc`: Close the selector
+
 ### Image Viewer
 - `h`, `Left`: Previous image
 - `l`, `Right`: Next image
@@ -195,11 +212,30 @@ text-cell rendering mode.
 - `Esc`: Cancel
 - `Enter`: Insert a newline
 - `Ctrl+s`: Send post/reply
+- `Ctrl+v`: Preview the first `!link` card
 - `Left`, `Ctrl+b`: Move cursor left
 - `Right`, `Ctrl+f`: Move cursor right
 - `Ctrl+a`: Move cursor to start
 - `Ctrl+e`: Move cursor to end
 - `Backspace`, `Ctrl+h`: Delete previous character
+
+Composer directives are placed on their own lines and are removed from the published text:
+
+```text
+!image /path/to/image.png | Accessible alt text
+!link https://example.com/article
+!lang ja,en
+!label nudity
+!replies followers,mentioned
+Post body
+---
+Second post in the same thread
+```
+
+- Up to four images and 1 MB per image are accepted; dimensions are used for the aspect ratio.
+- `!replies` accepts `everyone`, `none`, or a comma-separated combination of `followers`, `following`, and `mentioned`.
+- Separate thread posts with a line containing only `---`.
+- `X` pre-fills the internal `!quote AT_URI | CID` directive for the selected post.
 
 ### Post/User Search Input Mode
 - `Esc`: Cancel

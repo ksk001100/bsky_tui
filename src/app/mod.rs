@@ -1,5 +1,7 @@
 pub mod auth;
+pub mod composer;
 pub mod config;
+pub mod feed;
 pub mod images;
 pub mod moderation;
 pub mod profile;
@@ -18,7 +20,9 @@ use crate::{
     app::state::Tab,
     bsky,
     inputs::key::Key,
-    io::{InteractionKind, IoEvent, NotificationEvent, SearchEvent, TimelineEvent},
+    io::{
+        InteractionKind, IoEvent, ModerationAction, NotificationEvent, SearchEvent, TimelineEvent,
+    },
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,6 +45,11 @@ struct FacetViewer {
 struct InteractionViewer {
     kind: InteractionKind,
     items: Vec<bsky::InteractionItem>,
+    index: usize,
+}
+
+struct FeedViewer {
+    items: Vec<feed::FeedDescriptor>,
     index: usize,
 }
 
@@ -91,6 +100,11 @@ pub struct App {
     image_viewer: Option<ImageViewer>,
     facet_viewer: Option<FacetViewer>,
     interaction_viewer: Option<InteractionViewer>,
+    pending_confirmation: Option<ModerationAction>,
+    pending_delete: Option<String>,
+    feed_catalog: Vec<feed::FeedDescriptor>,
+    feed_viewer: Option<FeedViewer>,
+    composer_preview: Option<bsky::LinkPreview>,
     pub(crate) help_table_state: TableState,
 }
 
@@ -108,6 +122,11 @@ impl App {
             image_viewer: None,
             facet_viewer: None,
             interaction_viewer: None,
+            pending_confirmation: None,
+            pending_delete: None,
+            feed_catalog: Vec::new(),
+            feed_viewer: None,
+            composer_preview: None,
             help_table_state: TableState::default().with_selected(Some(0)),
         }
     }
@@ -130,6 +149,17 @@ impl App {
                 }
                 _ => AppReturn::Continue,
             };
+        }
+
+        if self.pending_confirmation.is_some() || self.pending_delete.is_some() {
+            return self.confirmation_action(key).await;
+        }
+        if self.composer_preview.is_some() {
+            self.composer_preview = None;
+            return AppReturn::Continue;
+        }
+        if self.feed_viewer.is_some() && !self.state.is_feed_search_mode() {
+            return self.feed_viewer_action(key).await;
         }
 
         if self.image_viewer.is_some() {
@@ -155,6 +185,7 @@ impl App {
             state::Mode::UserSearch => self.user_search_input_action(key).await,
             state::Mode::Thread => self.thread_action(key).await,
             state::Mode::Profile => self.profile_action(key).await,
+            state::Mode::FeedSearch => self.feed_search_input_action(key).await,
         }
     }
 
@@ -166,12 +197,29 @@ impl App {
                     .await;
                 AppReturn::Continue
             }
+            Key::Char('c') => {
+                if self.feed_catalog.is_empty() {
+                    self.dispatch(IoEvent::LoadFeedCatalog).await;
+                } else {
+                    self.feed_viewer = Some(FeedViewer {
+                        items: self.feed_catalog.clone(),
+                        index: 0,
+                    });
+                }
+                AppReturn::Continue
+            }
             Key::Char('n') => {
                 self.state.set_mode(state::Mode::Post);
                 AppReturn::Continue
             }
             Key::Char('N') => {
                 self.state.set_mode(state::Mode::Reply);
+                AppReturn::Continue
+            }
+            Key::Char('X') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    self.start_quote_composer(&feed.post);
+                }
                 AppReturn::Continue
             }
             Key::Ctrl('r') => {
@@ -226,6 +274,18 @@ impl App {
                 if let Some(feed) = self.state.get_current_feed() {
                     self.dispatch(IoEvent::LoadProfile(feed.post.author.did.clone().into()))
                         .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('m') | Key::Char('B') | Key::Char('!') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    self.request_post_moderation(&feed.post, key);
+                }
+                AppReturn::Continue
+            }
+            Key::Char('D') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    self.request_delete(&feed.post);
                 }
                 AppReturn::Continue
             }
@@ -397,6 +457,12 @@ impl App {
                 self.state.set_mode(state::Mode::Reply);
                 AppReturn::Continue
             }
+            Key::Char('X') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.start_quote_composer(&post);
+                }
+                AppReturn::Continue
+            }
             Key::Ctrl('r') => {
                 self.dispatch(IoEvent::SearchRepost).await;
                 AppReturn::Continue
@@ -448,6 +514,18 @@ impl App {
                 if let Some(post) = self.state.get_current_search_result() {
                     self.dispatch(IoEvent::LoadProfile(post.author.did.clone().into()))
                         .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('m') | Key::Char('B') | Key::Char('!') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.request_post_moderation(&post, key);
+                }
+                AppReturn::Continue
+            }
+            Key::Char('D') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.request_delete(&post);
                 }
                 AppReturn::Continue
             }
@@ -551,6 +629,21 @@ impl App {
                 }
             }
             Key::Char('F') => self.dispatch(IoEvent::ToggleFollow).await,
+            Key::Char('X') => {
+                if let Some(feed) = self.state.get_current_profile_post() {
+                    self.start_quote_composer(&feed.post);
+                }
+            }
+            Key::Char('D') => {
+                if let Some(feed) = self.state.get_current_profile_post() {
+                    self.request_delete(&feed.post);
+                }
+            }
+            Key::Char('m') | Key::Char('B') | Key::Char('!') => {
+                if let Some(profile) = self.state.get_profile() {
+                    self.request_profile_moderation(&profile.details, key);
+                }
+            }
             Key::Char('g') | Key::Char('G') => {
                 if let Some(profile) = self.state.get_profile() {
                     let kind = if key == Key::Char('g') {
@@ -622,6 +715,21 @@ impl App {
                         .await;
                 }
             }
+            Key::Char('X') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    self.start_quote_composer(&post);
+                }
+            }
+            Key::Char('D') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    self.request_delete(&post);
+                }
+            }
+            Key::Char('m') | Key::Char('B') | Key::Char('!') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    self.request_post_moderation(&post, key);
+                }
+            }
             Key::Char('L') | Key::Char('R') | Key::Char('Q') => {
                 if let Some(post) = self.state.get_current_thread_post() {
                     self.dispatch(IoEvent::LoadInteractions(
@@ -648,6 +756,85 @@ impl App {
         if let Err(error) = webbrowser::open(&url) {
             self.set_error(format!("Could not open embedded content: {error}"));
         }
+    }
+
+    fn start_quote_composer(&mut self, post: &atrium_api::app::bsky::feed::defs::PostViewData) {
+        self.state.set_input(Input::new(format!(
+            "!quote {} | {}\n",
+            post.uri,
+            post.cid.as_ref()
+        )));
+        self.state.set_mode(state::Mode::Post);
+    }
+
+    fn request_post_moderation(
+        &mut self,
+        post: &atrium_api::app::bsky::feed::defs::PostViewData,
+        key: Key,
+    ) {
+        self.pending_confirmation = Some(match key {
+            Key::Char('!') => ModerationAction::ReportPost {
+                uri: post.uri.clone(),
+                cid: post.cid.clone(),
+            },
+            _ => actor_moderation_action(&post.author, key),
+        });
+    }
+
+    fn request_profile_moderation(
+        &mut self,
+        profile: &atrium_api::app::bsky::actor::defs::ProfileViewDetailedData,
+        key: Key,
+    ) {
+        let viewer = profile.viewer.as_ref();
+        self.pending_confirmation = Some(match key {
+            Key::Char('m') => ModerationAction::MuteActor {
+                did: profile.did.clone(),
+                muted: viewer.and_then(|viewer| viewer.muted).unwrap_or(false),
+            },
+            Key::Char('B') => ModerationAction::BlockActor {
+                did: profile.did.clone(),
+                blocking_uri: viewer.and_then(|viewer| viewer.blocking.clone()),
+            },
+            _ => ModerationAction::ReportActor(profile.did.clone()),
+        });
+    }
+
+    fn request_delete(&mut self, post: &atrium_api::app::bsky::feed::defs::PostViewData) {
+        if post.author.did != self.state.get_did() {
+            self.set_error("Only your own posts can be deleted".to_owned());
+            return;
+        }
+        self.pending_delete = Some(post.uri.clone());
+    }
+
+    async fn confirmation_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('y') | Key::Char('Y') | Key::Enter => {
+                if let Some(uri) = self.pending_delete.take() {
+                    self.dispatch(IoEvent::DeletePost(uri)).await;
+                } else if let Some(action) = self.pending_confirmation.take() {
+                    self.dispatch(IoEvent::Moderate(action)).await;
+                }
+            }
+            Key::Char('n') | Key::Char('N') | Key::Esc | Key::Char('q') => {
+                self.pending_confirmation = None;
+                self.pending_delete = None;
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    pub fn confirmation_message(&self) -> Option<String> {
+        self.pending_delete
+            .as_ref()
+            .map(|uri| format!("Delete your post {uri}? This cannot be undone."))
+            .or_else(|| {
+                self.pending_confirmation
+                    .as_ref()
+                    .map(ModerationAction::confirmation)
+            })
     }
 
     async fn search_input_action(&mut self, key: Key) -> AppReturn {
@@ -720,6 +907,31 @@ impl App {
         AppReturn::Continue
     }
 
+    async fn feed_search_input_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => {
+                self.state.set_mode(state::Mode::Normal);
+                self.state.set_input(Input::default());
+            }
+            Key::Enter => {
+                let query = self.state.get_input().value().trim().to_owned();
+                if !query.is_empty() {
+                    self.dispatch(IoEvent::SearchFeeds(query)).await;
+                    self.state.set_mode(state::Mode::Normal);
+                    self.state.set_input(Input::default());
+                }
+            }
+            Key::Left | Key::Ctrl('b') => self.state.move_input_cursor_prev(),
+            Key::Right | Key::Ctrl('f') => self.state.move_input_cursor_next(),
+            Key::Ctrl('a') => self.state.move_input_cursor_start(),
+            Key::Ctrl('e') => self.state.move_input_cursor_end(),
+            Key::Char(c) => self.state.insert_input(InputRequest::InsertChar(c)),
+            Key::Backspace | Key::Ctrl('h') => self.state.remove_input_prev(),
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
     async fn post_action(&mut self, key: Key) -> AppReturn {
         match key {
             Key::Esc => {
@@ -729,6 +941,10 @@ impl App {
             }
             Key::Ctrl('s') => {
                 self.dispatch(IoEvent::SendPost).await;
+                AppReturn::Continue
+            }
+            Key::Ctrl('v') => {
+                self.preview_composer_link().await;
                 AppReturn::Continue
             }
             Key::Enter => {
@@ -776,6 +992,10 @@ impl App {
                 } else {
                     self.dispatch(IoEvent::Reply).await;
                 }
+                AppReturn::Continue
+            }
+            Key::Ctrl('v') => {
+                self.preview_composer_link().await;
                 AppReturn::Continue
             }
             Key::Enter => {
@@ -949,6 +1169,93 @@ impl App {
         AppReturn::Continue
     }
 
+    async fn feed_viewer_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc => self.feed_viewer = None,
+            Key::Char('k') | Key::Up => {
+                if let Some(viewer) = &mut self.feed_viewer {
+                    viewer.index = viewer.index.saturating_sub(1);
+                }
+            }
+            Key::Char('j') | Key::Down => {
+                if let Some(viewer) = &mut self.feed_viewer {
+                    if viewer.index + 1 < viewer.items.len() {
+                        viewer.index += 1;
+                    }
+                }
+            }
+            Key::Enter => {
+                if let Some(feed) = self
+                    .feed_viewer
+                    .as_ref()
+                    .and_then(|viewer| viewer.items.get(viewer.index))
+                    .cloned()
+                {
+                    self.feed_viewer = None;
+                    self.dispatch(IoEvent::SelectFeed(feed)).await;
+                }
+            }
+            Key::Char('s') => {
+                if let Some(feed) = self
+                    .feed_viewer
+                    .as_ref()
+                    .and_then(|viewer| viewer.items.get(viewer.index))
+                    .cloned()
+                {
+                    if matches!(feed.kind, feed::FeedKind::Custom(_)) {
+                        self.dispatch(IoEvent::ToggleSavedFeed(feed)).await;
+                    }
+                }
+            }
+            Key::Char('/') => {
+                self.state.set_mode(state::Mode::FeedSearch);
+                self.state.set_input(Input::default());
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    pub fn set_feed_catalog(&mut self, catalog: Vec<feed::FeedDescriptor>, open: bool) {
+        self.feed_catalog = catalog.clone();
+        if open {
+            self.feed_viewer = Some(FeedViewer {
+                items: catalog,
+                index: 0,
+            });
+        }
+    }
+
+    pub fn set_feed_search_results(&mut self, results: Vec<feed::FeedDescriptor>) {
+        self.feed_viewer = Some(FeedViewer {
+            items: results,
+            index: 0,
+        });
+    }
+
+    pub fn current_feed_viewer(&self) -> Option<(Vec<feed::FeedDescriptor>, usize)> {
+        let viewer = self.feed_viewer.as_ref()?;
+        Some((viewer.items.clone(), viewer.index))
+    }
+
+    async fn preview_composer_link(&mut self) {
+        match composer::parse_drafts(self.state.get_input().value())
+            .ok()
+            .and_then(|drafts| drafts.into_iter().find_map(|draft| draft.link))
+        {
+            Some(url) => self.dispatch(IoEvent::PreviewLink(url)).await,
+            None => self.set_error("Add a !link URL directive before previewing".to_owned()),
+        }
+    }
+
+    pub fn set_composer_preview(&mut self, preview: bsky::LinkPreview) {
+        self.composer_preview = Some(preview);
+    }
+
+    pub fn composer_preview(&self) -> Option<bsky::LinkPreview> {
+        self.composer_preview.clone()
+    }
+
     pub fn set_interactions(&mut self, kind: InteractionKind, items: Vec<bsky::InteractionItem>) {
         self.interaction_viewer = Some(InteractionViewer {
             kind,
@@ -1090,6 +1397,23 @@ fn interaction_kind(key: Key) -> InteractionKind {
         Key::Char('L') => InteractionKind::Likes,
         Key::Char('R') => InteractionKind::Reposts,
         _ => InteractionKind::Quotes,
+    }
+}
+
+fn actor_moderation_action(
+    actor: &atrium_api::app::bsky::actor::defs::ProfileViewBasicData,
+    key: Key,
+) -> ModerationAction {
+    let viewer = actor.viewer.as_ref();
+    match key {
+        Key::Char('m') => ModerationAction::MuteActor {
+            did: actor.did.clone(),
+            muted: viewer.and_then(|viewer| viewer.muted).unwrap_or(false),
+        },
+        _ => ModerationAction::BlockActor {
+            did: actor.did.clone(),
+            blocking_uri: viewer.and_then(|viewer| viewer.blocking.clone()),
+        },
     }
 }
 
