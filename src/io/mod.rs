@@ -16,6 +16,10 @@ pub enum IoEvent {
     LoadThread(String),
     LoadInteractions(InteractionKind, String, atrium_api::types::string::Cid),
     SearchUsers(String),
+    LoadProfile(atrium_api::types::string::AtIdentifier),
+    LoadProfileSection(crate::app::profile::ProfileSection),
+    ToggleFollow,
+    LoadConnections(InteractionKind, atrium_api::types::string::AtIdentifier),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -24,6 +28,8 @@ pub enum InteractionKind {
     Reposts,
     Quotes,
     Users,
+    Followers,
+    Follows,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

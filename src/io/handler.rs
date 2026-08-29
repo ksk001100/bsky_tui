@@ -7,7 +7,10 @@ use tui_input::Input;
 
 use super::{InteractionKind, IoEvent, NotificationEvent, SearchEvent, TimelineEvent};
 use crate::{
-    app::{auth::AuthCredentials, config::AppConfig, state::Mode, state::Tab, App},
+    app::{
+        auth::AuthCredentials, config::AppConfig, profile::ProfileSection, profile::ProfileState,
+        state::Mode, state::Tab, App,
+    },
     bsky,
 };
 
@@ -39,6 +42,10 @@ impl IoAsyncHandler {
                 self.do_load_interactions(kind, uri, cid).await
             }
             IoEvent::SearchUsers(query) => self.do_search_users(query).await,
+            IoEvent::LoadProfile(actor) => self.do_load_profile(actor).await,
+            IoEvent::LoadProfileSection(section) => self.do_load_profile_section(section).await,
+            IoEvent::ToggleFollow => self.do_toggle_follow().await,
+            IoEvent::LoadConnections(kind, actor) => self.do_load_connections(kind, actor).await,
         };
 
         let mut app = self.app.lock().await;
@@ -160,7 +167,9 @@ impl IoAsyncHandler {
             InteractionKind::Likes => bsky::post_likes(agent.as_ref(), uri, cid).await?,
             InteractionKind::Reposts => bsky::post_reposts(agent.as_ref(), uri, cid).await?,
             InteractionKind::Quotes => bsky::post_quotes(agent.as_ref(), uri, cid).await?,
-            InteractionKind::Users => return Err(eyre!("invalid post interaction type")),
+            InteractionKind::Users | InteractionKind::Followers | InteractionKind::Follows => {
+                return Err(eyre!("invalid post interaction type"));
+            }
         };
         self.app.lock().await.set_interactions(kind, items);
         Ok(())
@@ -172,6 +181,112 @@ impl IoAsyncHandler {
         app.state.set_mode(Mode::Normal);
         app.state.set_input(Input::default());
         app.set_interactions(InteractionKind::Users, items);
+        Ok(())
+    }
+
+    async fn do_load_profile(
+        &mut self,
+        actor: atrium_api::types::string::AtIdentifier,
+    ) -> Result<()> {
+        let agent = self.agent().await?;
+        let details = bsky::profile(agent.as_ref(), actor).await?;
+        let content = bsky::profile_content(
+            agent.as_ref(),
+            details.did.clone().into(),
+            ProfileSection::Posts,
+        )
+        .await?;
+        let moderation = self.app.lock().await.state.moderation();
+        let image_urls = vec![details.avatar.clone(), details.banner.clone()]
+            .into_iter()
+            .flatten()
+            .chain(match &content {
+                crate::app::profile::ProfileContent::Posts(posts) => posts
+                    .iter()
+                    .flat_map(|feed| bsky::post_image_urls(&feed.post, &moderation))
+                    .collect::<Vec<_>>(),
+                crate::app::profile::ProfileContent::Items(_) => Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        let mut app = self.app.lock().await;
+        app.state.open_profile(ProfileState::new(details, content));
+        app.set_interactions_closed();
+        app.queue_images(image_urls);
+        Ok(())
+    }
+
+    async fn do_load_profile_section(&mut self, section: ProfileSection) -> Result<()> {
+        let actor = self
+            .app
+            .lock()
+            .await
+            .state
+            .get_profile()
+            .map(|profile| profile.details.did.clone().into())
+            .ok_or_else(|| eyre!("no profile is open"))?;
+        let content = bsky::profile_content(self.agent().await?.as_ref(), actor, section).await?;
+        let moderation = self.app.lock().await.state.moderation();
+        let image_urls = match &content {
+            crate::app::profile::ProfileContent::Posts(posts) => posts
+                .iter()
+                .flat_map(|feed| bsky::post_image_urls(&feed.post, &moderation))
+                .collect(),
+            crate::app::profile::ProfileContent::Items(_) => Vec::new(),
+        };
+        let mut app = self.app.lock().await;
+        app.state.set_profile_content(section, content);
+        app.queue_images(image_urls);
+        Ok(())
+    }
+
+    async fn do_toggle_follow(&mut self) -> Result<()> {
+        let details = self
+            .app
+            .lock()
+            .await
+            .state
+            .get_profile()
+            .map(|profile| profile.details)
+            .ok_or_else(|| eyre!("no profile is open"))?;
+        if details.did == self.app.lock().await.state.get_did() {
+            return Err(eyre!("you cannot follow your own account"));
+        }
+        let agent = self.agent().await?;
+        let was_following = details
+            .viewer
+            .as_ref()
+            .and_then(|viewer| viewer.following.as_ref())
+            .is_some();
+        let following_uri = bsky::toggle_follow(agent.as_ref(), &details).await?;
+        let mut refreshed = bsky::profile(agent.as_ref(), details.did.clone().into()).await?;
+        refreshed.followers_count = Some(if was_following {
+            details.followers_count.unwrap_or(1).saturating_sub(1)
+        } else {
+            details.followers_count.unwrap_or(0).saturating_add(1)
+        });
+        if let Some(viewer) = &mut refreshed.viewer {
+            viewer.following = following_uri;
+        }
+        let mut app = self.app.lock().await;
+        if let Some(mut profile) = app.state.get_profile() {
+            profile.details = refreshed;
+            app.state.open_profile(profile);
+        }
+        Ok(())
+    }
+
+    async fn do_load_connections(
+        &mut self,
+        kind: InteractionKind,
+        actor: atrium_api::types::string::AtIdentifier,
+    ) -> Result<()> {
+        let agent = self.agent().await?;
+        let items = match kind {
+            InteractionKind::Followers => bsky::followers(agent.as_ref(), actor).await?,
+            InteractionKind::Follows => bsky::follows(agent.as_ref(), actor).await?,
+            _ => return Err(eyre!("invalid social graph list type")),
+        };
+        self.app.lock().await.set_interactions(kind, items);
         Ok(())
     }
 
@@ -441,6 +556,9 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::LoadThread(_) => "Thread request",
         IoEvent::LoadInteractions(_, _, _) => "Post interactions request",
         IoEvent::SearchUsers(_) => "User search",
+        IoEvent::LoadProfile(_) | IoEvent::LoadProfileSection(_) => "Profile request",
+        IoEvent::ToggleFollow => "Follow request",
+        IoEvent::LoadConnections(_, _) => "Social graph request",
         IoEvent::Search(_) => "Search",
     }
 }

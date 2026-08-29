@@ -6,11 +6,14 @@ use unicode_segmentation::UnicodeSegmentation;
 use atrium_api::{
     agent::atp_agent::{store::MemorySessionStore, AtpAgent},
     app::bsky::{
-        actor::{get_preferences, search_actors},
+        actor::{get_preferences, get_profile, search_actors},
         embed::{record::ViewRecordRefs, record_with_media::ViewMediaRefs},
         feed::{
-            defs, get_likes, get_post_thread, get_quotes, get_reposted_by, get_timeline, post,
-            search_posts,
+            defs, get_actor_feeds, get_actor_likes, get_author_feed, get_likes, get_post_thread,
+            get_quotes, get_reposted_by, get_timeline, post, search_posts,
+        },
+        graph::{
+            follow, get_actor_starter_packs, get_followers, get_follows, get_lists, starterpack,
         },
         notification,
         richtext::facet,
@@ -28,6 +31,7 @@ use bsky_sdk::api::types::TryFromUnknown;
 use bsky_sdk::BskyAgent;
 
 use crate::app::moderation::ModerationPrefs;
+use crate::app::profile::{ProfileContent, ProfileListItem, ProfileSection};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PostFacet {
@@ -41,6 +45,7 @@ pub struct InteractionItem {
     pub title: String,
     pub subtitle: String,
     pub url: String,
+    pub actor: Option<AtIdentifier>,
 }
 
 pub type Agent = AtpAgent<MemorySessionStore, ReqwestClient>;
@@ -249,6 +254,7 @@ pub async fn post_quotes(agent: &BskyAgent, uri: String, cid: Cid) -> Result<Vec
                 .map(|record| record.text.clone())
                 .unwrap_or_else(|_| "[Post unavailable]".to_owned()),
             url: get_url(post.author.handle.clone(), post.uri.clone()).unwrap_or_default(),
+            actor: None,
         })
         .collect())
 }
@@ -260,7 +266,208 @@ fn profile_interaction(
         title: profile.display_name.clone().unwrap_or_default(),
         subtitle: format!("@{}", profile.handle.as_str()),
         url: format!("https://bsky.app/profile/{}", profile.did.as_str()),
+        actor: Some(profile.did.clone().into()),
     }
+}
+
+pub async fn profile(
+    agent: &BskyAgent,
+    actor: AtIdentifier,
+) -> Result<atrium_api::app::bsky::actor::defs::ProfileViewDetailed> {
+    Ok(agent
+        .api
+        .app
+        .bsky
+        .actor
+        .get_profile(get_profile::ParametersData { actor }.into())
+        .await?)
+}
+
+pub async fn profile_content(
+    agent: &BskyAgent,
+    actor: AtIdentifier,
+    section: ProfileSection,
+) -> Result<ProfileContent> {
+    match section {
+        ProfileSection::Posts | ProfileSection::Replies | ProfileSection::Media => {
+            let filter = match section {
+                ProfileSection::Posts => "posts_no_replies",
+                ProfileSection::Replies => "posts_with_replies",
+                ProfileSection::Media => "posts_with_media",
+                _ => unreachable!(),
+            };
+            let output = agent
+                .api
+                .app
+                .bsky
+                .feed
+                .get_author_feed(
+                    get_author_feed::ParametersData {
+                        actor,
+                        cursor: None,
+                        filter: Some(filter.to_owned()),
+                        include_pins: Some(true),
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(ProfileContent::Posts(output.feed.clone()))
+        }
+        ProfileSection::Likes => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .feed
+                .get_actor_likes(
+                    get_actor_likes::ParametersData {
+                        actor,
+                        cursor: None,
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(ProfileContent::Posts(output.feed.clone()))
+        }
+        ProfileSection::Feeds => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .feed
+                .get_actor_feeds(
+                    get_actor_feeds::ParametersData {
+                        actor,
+                        cursor: None,
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(ProfileContent::Items(
+                output
+                    .feeds
+                    .iter()
+                    .map(|feed| ProfileListItem {
+                        title: feed.display_name.clone(),
+                        subtitle: feed.description.clone().unwrap_or_default(),
+                        url: at_uri_web_url(&feed.uri, "feed").unwrap_or_default(),
+                    })
+                    .collect(),
+            ))
+        }
+        ProfileSection::Lists => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .graph
+                .get_lists(
+                    get_lists::ParametersData {
+                        actor,
+                        cursor: None,
+                        limit: None,
+                        purposes: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(ProfileContent::Items(
+                output
+                    .lists
+                    .iter()
+                    .map(|list| ProfileListItem {
+                        title: list.name.clone(),
+                        subtitle: list.description.clone().unwrap_or_else(|| {
+                            format!("{} members", list.list_item_count.unwrap_or(0))
+                        }),
+                        url: at_uri_web_url(&list.uri, "lists").unwrap_or_default(),
+                    })
+                    .collect(),
+            ))
+        }
+        ProfileSection::StarterPacks => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .graph
+                .get_actor_starter_packs(
+                    get_actor_starter_packs::ParametersData {
+                        actor,
+                        cursor: None,
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(ProfileContent::Items(
+                output
+                    .starter_packs
+                    .iter()
+                    .map(|pack| {
+                        let record =
+                            starterpack::Record::try_from_unknown(pack.record.clone()).ok();
+                        ProfileListItem {
+                            title: record
+                                .as_ref()
+                                .map(|record| record.name.clone())
+                                .unwrap_or_else(|| "Starter Pack".to_owned()),
+                            subtitle: record
+                                .and_then(|record| record.description.clone())
+                                .unwrap_or_else(|| {
+                                    format!("{} members", pack.list_item_count.unwrap_or(0))
+                                }),
+                            url: starter_pack_url(&pack.uri, pack.creator.did.as_str())
+                                .unwrap_or_default(),
+                        }
+                    })
+                    .collect(),
+            ))
+        }
+    }
+}
+
+pub async fn toggle_follow(
+    agent: &BskyAgent,
+    profile: &atrium_api::app::bsky::actor::defs::ProfileViewDetailedData,
+) -> Result<Option<String>> {
+    if let Some(uri) = profile
+        .viewer
+        .as_ref()
+        .and_then(|viewer| viewer.following.as_ref())
+    {
+        agent.delete_record(uri).await?;
+        Ok(None)
+    } else {
+        let output = agent
+            .create_record(follow::RecordData {
+                created_at: Datetime::now(),
+                subject: profile.did.clone(),
+            })
+            .await?;
+        Ok(Some(output.uri.clone()))
+    }
+}
+
+fn at_uri_parts(uri: &str) -> Option<(&str, &str)> {
+    let mut parts = uri.strip_prefix("at://")?.split('/');
+    let did = parts.next()?;
+    let _collection = parts.next()?;
+    let rkey = parts.next()?;
+    Some((did, rkey))
+}
+
+fn at_uri_web_url(uri: &str, kind: &str) -> Option<String> {
+    let (did, rkey) = at_uri_parts(uri)?;
+    Some(format!("https://bsky.app/profile/{did}/{kind}/{rkey}"))
+}
+
+fn starter_pack_url(uri: &str, creator: &str) -> Option<String> {
+    let (_, rkey) = at_uri_parts(uri)?;
+    Some(format!("https://bsky.app/starter-pack/{creator}/{rkey}"))
 }
 
 pub async fn search(
@@ -313,6 +520,50 @@ pub async fn search_users(agent: &BskyAgent, query: String) -> Result<Vec<Intera
         .await?;
     Ok(output
         .actors
+        .iter()
+        .map(|profile| profile_interaction(profile))
+        .collect())
+}
+
+pub async fn followers(agent: &BskyAgent, actor: AtIdentifier) -> Result<Vec<InteractionItem>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .graph
+        .get_followers(
+            get_followers::ParametersData {
+                actor,
+                cursor: None,
+                limit: None,
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .followers
+        .iter()
+        .map(|profile| profile_interaction(profile))
+        .collect())
+}
+
+pub async fn follows(agent: &BskyAgent, actor: AtIdentifier) -> Result<Vec<InteractionItem>> {
+    let output = agent
+        .api
+        .app
+        .bsky
+        .graph
+        .get_follows(
+            get_follows::ParametersData {
+                actor,
+                cursor: None,
+                limit: None,
+            }
+            .into(),
+        )
+        .await?;
+    Ok(output
+        .follows
         .iter()
         .map(|profile| profile_interaction(profile))
         .collect())
@@ -961,5 +1212,19 @@ mod tests {
 
         let facets = facets_from_record(&record);
         assert_eq!(facets[0].label, "https://example.com");
+    }
+
+    #[test]
+    fn profile_resource_urls_are_built_from_at_uris() {
+        let uri = "at://did:plc:example/app.bsky.feed.generator/abc123";
+        assert_eq!(
+            at_uri_web_url(uri, "feed").as_deref(),
+            Some("https://bsky.app/profile/did:plc:example/feed/abc123")
+        );
+        assert_eq!(
+            starter_pack_url(uri, "did:plc:creator").as_deref(),
+            Some("https://bsky.app/starter-pack/did:plc:creator/abc123")
+        );
+        assert!(at_uri_web_url("not-an-at-uri", "feed").is_none());
     }
 }

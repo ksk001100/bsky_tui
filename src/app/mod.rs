@@ -2,6 +2,7 @@ pub mod auth;
 pub mod config;
 pub mod images;
 pub mod moderation;
+pub mod profile;
 pub mod state;
 pub mod thread;
 pub mod ui;
@@ -138,7 +139,7 @@ impl App {
             return self.facet_viewer_action(key);
         }
         if self.interaction_viewer.is_some() {
-            return self.interaction_viewer_action(key);
+            return self.interaction_viewer_action(key).await;
         }
 
         match self.state.get_mode() {
@@ -153,6 +154,7 @@ impl App {
             state::Mode::Search => self.search_input_action(key).await,
             state::Mode::UserSearch => self.user_search_input_action(key).await,
             state::Mode::Thread => self.thread_action(key).await,
+            state::Mode::Profile => self.profile_action(key).await,
         }
     }
 
@@ -216,6 +218,13 @@ impl App {
             Key::Char('t') => {
                 if let Some(feed) = self.state.get_current_feed() {
                     self.dispatch(IoEvent::LoadThread(feed.post.uri.clone()))
+                        .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('p') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    self.dispatch(IoEvent::LoadProfile(feed.post.author.did.clone().into()))
                         .await;
                 }
                 AppReturn::Continue
@@ -340,6 +349,13 @@ impl App {
                 }
                 AppReturn::Continue
             }
+            Key::Char('p') => {
+                if let Some(notification) = self.state.get_current_notification() {
+                    self.dispatch(IoEvent::LoadProfile(notification.author.did.clone().into()))
+                        .await;
+                }
+                AppReturn::Continue
+            }
             Key::Tab => {
                 self.state.set_next_tab();
                 match self.state.get_tab() {
@@ -428,6 +444,13 @@ impl App {
                 }
                 AppReturn::Continue
             }
+            Key::Char('p') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.dispatch(IoEvent::LoadProfile(post.author.did.clone().into()))
+                        .await;
+                }
+                AppReturn::Continue
+            }
             Key::Char('e') => {
                 self.open_selected_embed(self.state.get_current_search_result());
                 AppReturn::Continue
@@ -506,6 +529,73 @@ impl App {
         }
     }
 
+    async fn profile_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Char('q') | Key::Esc => self.state.close_profile(),
+            Key::Down | Key::Char('j') | Key::Ctrl('n') => self.state.move_profile_down(),
+            Key::Up | Key::Char('k') | Key::Ctrl('p') => self.state.move_profile_up(),
+            Key::Left | Key::Char('h') => {
+                if let Some(profile) = self.state.get_profile() {
+                    let section = profile.section.previous();
+                    if section != profile.section {
+                        self.dispatch(IoEvent::LoadProfileSection(section)).await;
+                    }
+                }
+            }
+            Key::Right | Key::Char('l') => {
+                if let Some(profile) = self.state.get_profile() {
+                    let section = profile.section.next();
+                    if section != profile.section {
+                        self.dispatch(IoEvent::LoadProfileSection(section)).await;
+                    }
+                }
+            }
+            Key::Char('F') => self.dispatch(IoEvent::ToggleFollow).await,
+            Key::Char('g') | Key::Char('G') => {
+                if let Some(profile) = self.state.get_profile() {
+                    let kind = if key == Key::Char('g') {
+                        InteractionKind::Followers
+                    } else {
+                        InteractionKind::Follows
+                    };
+                    self.dispatch(IoEvent::LoadConnections(
+                        kind,
+                        profile.details.did.clone().into(),
+                    ))
+                    .await;
+                }
+            }
+            Key::Char('t') => {
+                if let Some(feed) = self.state.get_current_profile_post() {
+                    self.dispatch(IoEvent::LoadThread(feed.post.uri.clone()))
+                        .await;
+                }
+            }
+            Key::Char('p') => {
+                if let Some(feed) = self.state.get_current_profile_post() {
+                    self.dispatch(IoEvent::LoadProfile(feed.post.author.did.clone().into()))
+                        .await;
+                }
+            }
+            Key::Enter | Key::Char('b') => {
+                let url = self
+                    .state
+                    .get_current_profile_post()
+                    .and_then(|feed| {
+                        bsky::get_url(feed.post.author.handle.clone(), feed.post.uri.clone())
+                    })
+                    .or_else(|| self.state.get_current_profile_item().map(|item| item.url));
+                if let Some(url) = url {
+                    if let Err(error) = webbrowser::open(&url) {
+                        self.set_error(format!("Could not open profile item: {error}"));
+                    }
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
     async fn thread_action(&mut self, key: Key) -> AppReturn {
         match key {
             Key::Char('q') | Key::Esc => self.state.close_thread(),
@@ -525,6 +615,12 @@ impl App {
             }
             Key::Char('f') => {
                 self.open_facet_viewer(self.state.get_current_thread_post());
+            }
+            Key::Char('p') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    self.dispatch(IoEvent::LoadProfile(post.author.did.clone().into()))
+                        .await;
+                }
             }
             Key::Char('L') | Key::Char('R') | Key::Char('Q') => {
                 if let Some(post) = self.state.get_current_thread_post() {
@@ -819,7 +915,7 @@ impl App {
         Some((viewer.facets.clone(), viewer.index))
     }
 
-    fn interaction_viewer_action(&mut self, key: Key) -> AppReturn {
+    async fn interaction_viewer_action(&mut self, key: Key) -> AppReturn {
         match key {
             Key::Char('q') | Key::Esc => self.interaction_viewer = None,
             Key::Char('k') | Key::Up => {
@@ -835,12 +931,14 @@ impl App {
                 }
             }
             Key::Enter | Key::Char('b') => {
-                let url = self
+                let selected = self
                     .interaction_viewer
                     .as_ref()
                     .and_then(|viewer| viewer.items.get(viewer.index))
-                    .map(|item| item.url.clone());
-                if let Some(url) = url {
+                    .cloned();
+                if let Some(actor) = selected.as_ref().and_then(|item| item.actor.clone()) {
+                    self.dispatch(IoEvent::LoadProfile(actor)).await;
+                } else if let Some(url) = selected.map(|item| item.url) {
                     if let Err(error) = webbrowser::open(&url) {
                         self.set_error(format!("Could not open interaction: {error}"));
                     }
@@ -857,6 +955,10 @@ impl App {
             items,
             index: 0,
         });
+    }
+
+    pub fn set_interactions_closed(&mut self) {
+        self.interaction_viewer = None;
     }
 
     pub fn current_interactions(

@@ -14,6 +14,8 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 - View and browse notifications
 - Search for posts
 - Search for users
+- View profiles, profile posts/replies/media/likes, feeds, lists, and starter packs
+- Follow/unfollow users and browse followers/following
 - View post threads and reply trees
 - View quote posts, external link cards, and video/GIF metadata
 - Open URLs, mentions, hashtags, external links, and videos
@@ -111,6 +113,7 @@ text-cell rendering mode.
 - `Tab`: Switch tabs (Home → Notifications → Search → Home)
 - `?`: Show help
 - `u`: Search for users
+- `p`: Open the selected post author profile (where available)
 
 ### Home Tab
 - `j`, `Down`, `Ctrl+n`: Scroll down
@@ -163,6 +166,19 @@ text-cell rendering mode.
 - `f`: Select a URL, mention, or hashtag from the post
 - `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
 - `q`, `Esc`: Close the thread
+
+### Profile Viewer
+- `h`, `Left`: Previous profile section
+- `l`, `Right`: Next profile section
+- `j`, `Down`, `Ctrl+n`: Move down
+- `k`, `Up`, `Ctrl+p`: Move up
+- `F`: Follow/unfollow the profile
+- `g`: Show followers
+- `G`: Show following
+- `p`: Open the selected post author profile
+- `t`: Open the selected post thread
+- `Enter`, `b`: Open the selected post, feed, list, or starter pack
+- `q`, `Esc`: Close the profile
 
 ### Facet and Interaction Lists
 - `j`, `Down`: Move down

@@ -15,6 +15,7 @@ use unicode_width::UnicodeWidthChar;
 use crate::io::InteractionKind;
 use crate::{
     app::moderation::{ModerationDecision, ModerationPrefs},
+    app::profile::{ProfileContent, ProfileSection, ProfileState},
     app::state::{AppState, Tab},
     app::thread::ThreadEntry,
     bsky, utils,
@@ -105,6 +106,8 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
         InteractionKind::Reposts => " Reposts ",
         InteractionKind::Quotes => " Quotes ",
         InteractionKind::Users => " User Search Results ",
+        InteractionKind::Followers => " Followers ",
+        InteractionKind::Follows => " Following ",
     };
     let rows = if items.is_empty() {
         vec![ListItem::new("(No results)")]
@@ -119,6 +122,118 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
             .title(format!("{title}— j/k select, Enter open, Esc close "))
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1)),
+    )
+}
+
+pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
+    let details = &profile.details;
+    let display_name = details.display_name.clone().unwrap_or_default();
+    let relationship = if details
+        .viewer
+        .as_ref()
+        .and_then(|viewer| viewer.following.as_ref())
+        .is_some()
+    {
+        "Following — F to unfollow"
+    } else {
+        "Not following — F to follow"
+    };
+    let labels = details
+        .labels
+        .as_ref()
+        .map(|labels| {
+            labels
+                .iter()
+                .map(|label| label.val.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|labels| !labels.is_empty())
+        .unwrap_or_else(|| "none".to_owned());
+    Paragraph::new(vec![
+        Line::from(Span::styled(
+            display_name,
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(format!("@{}", details.handle.as_str())),
+        Line::from(format!("DID: {}", details.did.as_str())),
+        Line::from(format!(
+            "{} posts   {} followers   {} following",
+            details.posts_count.unwrap_or(0),
+            details.followers_count.unwrap_or(0),
+            details.follows_count.unwrap_or(0)
+        )),
+        Line::from(relationship),
+        Line::from(format!("Labels: {labels}")),
+        Line::from(details.description.clone().unwrap_or_default()),
+    ])
+    .wrap(ratatui::widgets::Wrap { trim: true })
+    .block(Block::default().borders(Borders::ALL).title(" Profile "))
+}
+
+pub fn profile_tabs(profile: &ProfileState) -> Tabs<'static> {
+    let selected = ProfileSection::ALL
+        .iter()
+        .position(|section| *section == profile.section)
+        .unwrap_or(0);
+    Tabs::new(
+        ProfileSection::ALL
+            .iter()
+            .map(|section| Line::from(section.label()))
+            .collect::<Vec<_>>(),
+    )
+    .select(selected)
+    .highlight_style(
+        Style::default()
+            .fg(Color::LightCyan)
+            .add_modifier(Modifier::BOLD),
+    )
+    .divider(" | ")
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" h/l switch section "),
+    )
+}
+
+pub fn profile_posts(
+    profile: &ProfileState,
+    moderation: ModerationPrefs,
+    width: u16,
+) -> PostList<'static> {
+    let posts = match &profile.content {
+        ProfileContent::Posts(posts) => posts
+            .iter()
+            .map(|feed| (feed.post.data.clone(), bsky::feed_context_lines(feed)))
+            .collect(),
+        ProfileContent::Items(_) => Vec::new(),
+    };
+    post_list(posts, moderation, width, profile.section.label().to_owned())
+}
+
+pub fn profile_items(profile: &ProfileState) -> List<'static> {
+    let items = match &profile.content {
+        ProfileContent::Items(items) if !items.is_empty() => items
+            .iter()
+            .map(|item| {
+                ListItem::new(vec![
+                    Line::from(Span::styled(
+                        item.title.clone(),
+                        Style::default().fg(Color::LightCyan),
+                    )),
+                    Line::from(item.subtitle.clone()),
+                ])
+            })
+            .collect(),
+        _ => vec![ListItem::new("(No results)")],
+    };
+    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
+        Block::default().borders(Borders::ALL).title(format!(
+            " {} — Enter open in browser ",
+            profile.section.label()
+        )),
     )
 }
 
@@ -166,6 +281,10 @@ const HELP_ROWS: &[(&str, &str, &str, &str)] = &[
         "L / R / Q",
         "Show Likes / Reposts / Quotes",
     ),
+    ("Profile", "", "h/l, Left/Right", "Switch profile section"),
+    ("", "", "F", "Follow or unfollow profile"),
+    ("", "", "g / G", "Show followers / following"),
+    ("", "", "Enter, b", "Open selected profile item"),
     (
         "",
         "Notifications",

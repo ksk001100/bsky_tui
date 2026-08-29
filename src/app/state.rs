@@ -12,6 +12,7 @@ use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
 use crate::app::moderation::ModerationPrefs;
+use crate::app::profile::{ProfileContent, ProfileSection, ProfileState};
 use crate::app::thread::ThreadEntry;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -23,6 +24,7 @@ pub enum Mode {
     Search,
     UserSearch,
     Thread,
+    Profile,
 }
 
 impl fmt::Display for Mode {
@@ -35,6 +37,7 @@ impl fmt::Display for Mode {
             Mode::Search => "Search",
             Mode::UserSearch => "User Search",
             Mode::Thread => "Thread",
+            Mode::Profile => "Profile",
         };
         write!(f, "{}", str)
     }
@@ -90,6 +93,7 @@ pub enum AppState {
         thread: Option<Vec<ThreadEntry>>,
         thread_list_state: ListState,
         thread_list_position: usize,
+        profile: Option<ProfileState>,
     },
 }
 
@@ -128,6 +132,7 @@ impl AppState {
             thread: None,
             thread_list_state: ListState::default(),
             thread_list_position: 0,
+            profile: None,
         }
     }
 
@@ -260,6 +265,90 @@ impl AppState {
                 ..
             }
         )
+    }
+
+    pub fn open_profile(&mut self, profile_state: ProfileState) {
+        if let Self::Initialized { mode, profile, .. } = self {
+            *profile = Some(profile_state);
+            *mode = Mode::Profile;
+        }
+    }
+
+    pub fn close_profile(&mut self) {
+        if let Self::Initialized { mode, profile, .. } = self {
+            *mode = Mode::Normal;
+            *profile = None;
+        }
+    }
+
+    pub fn is_profile_mode(&self) -> bool {
+        matches!(
+            self,
+            Self::Initialized {
+                mode: Mode::Profile,
+                ..
+            }
+        )
+    }
+
+    pub fn get_profile(&self) -> Option<ProfileState> {
+        if let Self::Initialized { profile, .. } = self {
+            profile.clone()
+        } else {
+            None
+        }
+    }
+
+    pub fn set_profile_content(&mut self, section: ProfileSection, content: ProfileContent) {
+        if let Self::Initialized {
+            profile: Some(profile),
+            ..
+        } = self
+        {
+            profile.set_content(section, content);
+        }
+    }
+
+    pub fn move_profile_up(&mut self) {
+        if let Self::Initialized {
+            profile: Some(profile),
+            ..
+        } = self
+        {
+            profile.position = profile.position.saturating_sub(1);
+            profile
+                .list_state
+                .select((!profile.content.is_empty()).then_some(profile.position));
+        }
+    }
+
+    pub fn move_profile_down(&mut self) {
+        if let Self::Initialized {
+            profile: Some(profile),
+            ..
+        } = self
+        {
+            if profile.position + 1 < profile.content.len() {
+                profile.position += 1;
+                profile.list_state.select(Some(profile.position));
+            }
+        }
+    }
+
+    pub fn get_current_profile_post(&self) -> Option<FeedViewPost> {
+        let profile = self.get_profile()?;
+        match profile.content {
+            ProfileContent::Posts(posts) => posts.get(profile.position).cloned(),
+            ProfileContent::Items(_) => None,
+        }
+    }
+
+    pub fn get_current_profile_item(&self) -> Option<crate::app::profile::ProfileListItem> {
+        let profile = self.get_profile()?;
+        match profile.content {
+            ProfileContent::Items(items) => items.get(profile.position).cloned(),
+            ProfileContent::Posts(_) => None,
+        }
     }
 
     pub fn get_did(&self) -> Did {

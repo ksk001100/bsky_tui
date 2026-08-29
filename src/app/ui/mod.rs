@@ -5,7 +5,7 @@ pub(crate) use draw::HELP_ROW_COUNT;
 
 use ratatui::{
     backend::Backend,
-    layout::{Alignment, Position},
+    layout::{Alignment, Constraint, Direction, Layout, Position},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
@@ -37,6 +37,8 @@ where
         let area = layout::popup(60, 20, size);
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
+    } else if app.state.is_profile_mode() {
+        render_profile(f, app, body_chunks[1]);
     } else if app.state.is_thread_mode() {
         let thread = draw::thread(app.state(), body_chunks[1].width);
         let mut list_state = app.state.get_thread_list_state();
@@ -145,6 +147,85 @@ where
         f.render_widget(Clear, area);
         f.render_widget(popup, area);
     }
+}
+
+fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let Some(profile) = app.state.get_profile() else {
+        return;
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(10),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(area);
+    let header = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(16),
+            Constraint::Percentage(25),
+            Constraint::Min(24),
+        ])
+        .split(chunks[0]);
+
+    render_profile_image(
+        f,
+        app,
+        profile.details.avatar.as_deref(),
+        header[0],
+        "Avatar",
+    );
+    render_profile_image(
+        f,
+        app,
+        profile.details.banner.as_deref(),
+        header[1],
+        "Banner",
+    );
+    f.render_widget(draw::profile_header(&profile), header[2]);
+    f.render_widget(draw::profile_tabs(&profile), chunks[1]);
+
+    let mut list_state = profile.list_state.clone();
+    match &profile.content {
+        crate::app::profile::ProfileContent::Posts(_) => {
+            let posts = draw::profile_posts(&profile, app.state.moderation(), chunks[2].width);
+            f.render_stateful_widget(posts.widget, chunks[2], &mut list_state);
+            render_post_images(f, app, &posts.layouts, chunks[2], list_state.offset());
+        }
+        crate::app::profile::ProfileContent::Items(_) => {
+            f.render_stateful_widget(draw::profile_items(&profile), chunks[2], &mut list_state);
+        }
+    }
+}
+
+fn render_profile_image(
+    f: &mut Frame,
+    app: &mut App,
+    url: Option<&str>,
+    area: ratatui::layout::Rect,
+    title: &str,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {title} "));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if let Some(url) = url {
+        if let Some(protocol) = app.image_mut(url) {
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                inner,
+                protocol,
+            );
+            return;
+        }
+    }
+    f.render_widget(
+        Paragraph::new("(none/loading)").alignment(Alignment::Center),
+        inner,
+    );
 }
 
 fn render_post_images(
