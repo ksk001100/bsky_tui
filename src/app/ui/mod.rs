@@ -220,7 +220,7 @@ fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     f.render_widget(draw::profile_header(&profile), header[2]);
     f.render_widget(draw::profile_tabs(&profile), chunks[1]);
 
-    let mut list_state = profile.list_state.clone();
+    let mut list_state = profile.list_state;
     match &profile.content {
         crate::app::profile::ProfileContent::Posts(_) => {
             let posts = draw::profile_posts(&profile, app.state.moderation(), chunks[2].width);

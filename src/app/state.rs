@@ -204,7 +204,7 @@ impl AppState {
             thread_list_state, ..
         } = self
         {
-            thread_list_state.clone()
+            *thread_list_state
         } else {
             ListState::default()
         }
@@ -699,7 +699,7 @@ impl AppState {
             search_list_state, ..
         } = self
         {
-            search_list_state.clone()
+            *search_list_state
         } else {
             ListState::default()
         }
@@ -808,7 +808,7 @@ impl AppState {
 
     pub fn get_tl_list_state(&self) -> ListState {
         if let Self::Initialized { tl_list_state, .. } = self {
-            tl_list_state.clone()
+            *tl_list_state
         } else {
             ListState::default()
         }
@@ -820,7 +820,7 @@ impl AppState {
             ..
         } = self
         {
-            notifications_list_state.clone()
+            *notifications_list_state
         } else {
             ListState::default()
         }

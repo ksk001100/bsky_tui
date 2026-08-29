@@ -33,7 +33,7 @@ pub async fn start_ui(
     terminal.clear()?;
     terminal.hide_cursor()?;
 
-    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((10, 20)));
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
     app.lock().await.configure_images(picker);
 
     let result = run_ui(&mut terminal, app, skip_splash, splash).await;

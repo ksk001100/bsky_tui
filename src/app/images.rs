@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use ratatui::layout::Rect;
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol};
+use ratatui_image::{picker::Picker, protocol::StatefulProtocol, FontSize};
 use tokio::sync::mpsc;
 
 const MAX_IMAGE_BYTES: usize = 12 * 1024 * 1024;
@@ -44,7 +44,7 @@ impl ImageCache {
     }
 
     pub fn configure(&mut self, mut picker: Picker) {
-        picker.set_background_color([0, 0, 0, 0]);
+        picker.set_background_color(Some([0, 0, 0, 0]));
         self.picker = Some(picker);
     }
 
@@ -132,20 +132,20 @@ impl ImageCache {
     }
 }
 
-fn centered_image_area(bounds: Rect, pixel_dimensions: (u32, u32), font_size: (u16, u16)) -> Rect {
+fn centered_image_area(bounds: Rect, pixel_dimensions: (u32, u32), font_size: FontSize) -> Rect {
     if bounds.width == 0 || bounds.height == 0 || pixel_dimensions.0 == 0 || pixel_dimensions.1 == 0
     {
         return Rect::new(bounds.x, bounds.y, 0, 0);
     }
 
-    let available_width = bounds.width as f64 * font_size.0.max(1) as f64;
-    let available_height = bounds.height as f64 * font_size.1.max(1) as f64;
+    let available_width = bounds.width as f64 * font_size.width.max(1) as f64;
+    let available_height = bounds.height as f64 * font_size.height.max(1) as f64;
     let scale = (available_width / pixel_dimensions.0 as f64)
         .min(available_height / pixel_dimensions.1 as f64);
-    let width = ((pixel_dimensions.0 as f64 * scale) / font_size.0.max(1) as f64)
+    let width = ((pixel_dimensions.0 as f64 * scale) / font_size.width.max(1) as f64)
         .ceil()
         .clamp(1.0, bounds.width as f64) as u16;
-    let height = ((pixel_dimensions.1 as f64 * scale) / font_size.1.max(1) as f64)
+    let height = ((pixel_dimensions.1 as f64 * scale) / font_size.height.max(1) as f64)
         .ceil()
         .clamp(1.0, bounds.height as f64) as u16;
 
@@ -208,10 +208,10 @@ mod tests {
     #[test]
     fn image_area_is_centered_using_pixel_and_cell_aspect_ratios() {
         let bounds = Rect::new(5, 3, 80, 30);
-        let area = centered_image_area(bounds, (1000, 500), (10, 20));
+        let area = centered_image_area(bounds, (1000, 500), FontSize::new(10, 20));
         assert_eq!(area, Rect::new(5, 8, 80, 20));
 
-        let portrait = centered_image_area(bounds, (500, 1000), (10, 20));
+        let portrait = centered_image_area(bounds, (500, 1000), FontSize::new(10, 20));
         assert_eq!(portrait, Rect::new(30, 3, 30, 30));
     }
 }
