@@ -29,6 +29,11 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 - Like/unlike posts
 - Repost/unrepost posts
 - Open posts in browser
+- Browse, create, edit, save, and moderate lists
+- Browse, create, edit, and join Starter Packs; view trends and suggested follows
+- Read and send direct messages through the dedicated Bluesky chat service
+- Manage muted words/threads, labelers, content labels, and advanced thread safety actions
+- Register and switch accounts, with configurable colors, images, dates, language, and shortcuts
 
 ## Installation
 
@@ -65,7 +70,31 @@ identifier = "your.email@example.com" # Your Bluesky account email or handle
 service_url = "https://bsky.social" # Your PDS/service URL
 skip_splash = false               # Whether to skip the splash screen (optional)
 splash_path = ""                  # Path to a custom splash screen (optional)
+
+[ui]
+show_images = true
+date_format = "%Y-%m-%d %H:%M"
+language = "auto"                 # Used for posts without an explicit !lang directive
+accent_color = "blue"
+
+[ui.keybindings]
+open_lists = "g"
+open_dm = "d"
+open_moderation = ";"
+open_settings = ","
 ```
+
+Additional accounts can be registered in the Settings panel or in `config.toml`:
+
+```toml
+active_account = "alice.example"
+
+[[accounts]]
+identifier = "alice.example"
+service_url = "https://bsky.social"
+```
+
+App Passwords remain separate in the OS credential store and are keyed by account identifier.
 
 Create an App Password in Bluesky under **Settings → Privacy and security → App passwords**,
 then store it in the operating system's credential store. Input is hidden and confirmed before
@@ -123,6 +152,10 @@ text-cell rendering mode.
 - `m`, `B`, `!`: Mute/unmute, block/unblock, or report (with confirmation)
 - `D`: Delete the selected post when it belongs to you (with confirmation)
 - `X`: Quote the selected post
+- `g`: Open Lists and Starter Packs
+- `d`: Open Direct Messages
+- `;`: Open Moderation & Safety
+- `,`: Open Settings & Accounts
 
 ### Home Tab
 - `j`, `Down`, `Ctrl+n`: Scroll down
@@ -190,6 +223,9 @@ text-cell rendering mode.
 - `e`: Open an external link or video embed
 - `f`: Select a URL, mention, or hashtag from the post
 - `L`, `R`, `Q`: Show Likes, Reposts, or Quotes
+- `H`: Hide or unhide the selected reply when the thread is yours
+- `M`: Mute or unmute the thread
+- `Ctrl+d`: Detach a selected quote of your own post
 - `Esc`: Close the thread
 
 ### Profile Viewer
@@ -219,7 +255,23 @@ text-cell rendering mode.
 - `Enter`: Switch to the selected feed
 - `/`: Search custom feeds
 - `s`: Save or unsave a custom feed
+- `!`: Report a custom feed with a selected reason
 - `Esc`: Close the selector
+
+### Lists, Starter Packs, Direct Messages, Moderation, and Settings
+
+- `1`–`6`: Switch between Lists, Starter Packs, Discover, DMs, Moderation, and Settings
+- `j`, `Down` / `k`, `Up`: Move selection
+- `Enter`, `o`: Open the selected item
+- `n`, `a`, `e`, `x`: Create, add member, edit, or delete where supported
+- `s`: Save a curational list or subscribe/unsubscribe a moderation list
+- `f`: Use a curational list as the home feed
+- `J`: Join the open Starter Pack by following its members
+- `w`: Write a message in an open conversation
+- `Space`: Mute or unmute a conversation
+- `b`, `r`: Block or report a DM participant/content
+- `L`, `l`: Add or toggle a labeler subscription
+- `Esc`: Close the editor, go to the parent view, or close the panel
 
 ### Image Viewer
 - `h`, `Left`: Previous image

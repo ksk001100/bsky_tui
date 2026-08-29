@@ -45,6 +45,8 @@ use crate::app::moderation::ModerationPrefs;
 use crate::app::profile::{ProfileContent, ProfileListItem, ProfileSection};
 use crate::io::ModerationAction;
 
+pub mod feature_services;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PostFacet {
     pub label: String,
@@ -208,6 +210,26 @@ pub async fn selected_feed_timeline(
                     get_feed::ParametersData {
                         cursor,
                         feed: uri.clone(),
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            Ok(TimelinePage {
+                feed: output.feed.clone(),
+                cursor: output.cursor.clone(),
+            })
+        }
+        FeedKind::List(uri) => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .feed
+                .get_list_feed(
+                    atrium_api::app::bsky::feed::get_list_feed::ParametersData {
+                        cursor,
+                        list: uri.clone(),
                         limit: None,
                     }
                     .into(),
@@ -973,6 +995,23 @@ pub fn post_embed_url(post: &defs::PostViewData) -> Option<String> {
             }
             _ => None,
         },
+        _ => None,
+    }
+}
+
+pub fn quoted_post(post: &defs::PostViewData) -> Option<(String, Did)> {
+    let Union::Refs(embed) = post.embed.as_ref()? else {
+        return None;
+    };
+    let record = match embed {
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordView(record) => record,
+        defs::PostViewEmbedRefs::AppBskyEmbedRecordWithMediaView(embed) => &embed.record,
+        _ => return None,
+    };
+    match &record.record {
+        Union::Refs(ViewRecordRefs::ViewRecord(quoted)) => {
+            Some((quoted.uri.clone(), quoted.author.did.clone()))
+        }
         _ => None,
     }
 }

@@ -6,7 +6,9 @@ pub(crate) use draw::HELP_ROW_COUNT;
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Position},
-    widgets::{Block, Borders, Clear, Paragraph},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage};
@@ -177,6 +179,66 @@ where
         f.render_widget(popup, area);
     }
 
+    let accent = app.accent_color();
+    if let Some(panel) = app.feature_panel() {
+        let area = layout::popup(92, 86, size);
+        let items = if panel.rows.is_empty() {
+            vec![ListItem::new("No items")]
+        } else {
+            panel
+                .rows
+                .iter()
+                .map(|row| {
+                    ListItem::new(vec![
+                        Line::from(vec![
+                            Span::styled(
+                                if row.unread { "● " } else { "  " },
+                                Style::default().fg(accent),
+                            ),
+                            Span::styled(
+                                row.title.clone(),
+                                Style::default().add_modifier(Modifier::BOLD),
+                            ),
+                        ]),
+                        Line::from(format!("  {}", row.detail)),
+                    ])
+                })
+                .collect()
+        };
+        let widget = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" {} ", panel.title))
+                    .title_bottom(" n new  a add  e edit  x delete  s save/subscribe  f feed  w write  Esc back "),
+            )
+            .highlight_style(Style::default().bg(accent).fg(Color::White));
+        let mut state =
+            ListState::default().with_selected((!panel.rows.is_empty()).then_some(panel.selected));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(widget, area, &mut state);
+
+        if let Some(prompt) = panel.prompt.as_ref() {
+            let prompt_area = layout::popup(78, 28, size);
+            let text = format!("{}\n\n{}", prompt.help, prompt.input.value());
+            f.render_widget(Clear, prompt_area);
+            f.render_widget(
+                Paragraph::new(text)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(format!(" {} ", prompt.label)),
+                    )
+                    .wrap(Wrap { trim: false }),
+                prompt_area,
+            );
+            f.set_cursor_position(Position::new(
+                prompt_area.x + 1 + prompt.input.visual_cursor() as u16,
+                prompt_area.y + 4,
+            ));
+        }
+    }
+
     if let Some(message) = app.error() {
         let popup = draw::error(message);
         let area = layout::popup(70, 30, size);
@@ -255,14 +317,16 @@ fn render_profile_image(
         .title(format!(" {title} "));
     let inner = block.inner(area);
     f.render_widget(block, area);
-    if let Some(url) = url {
-        if let Some(protocol) = app.image_mut(url) {
-            f.render_stateful_widget(
-                StatefulImage::default().resize(Resize::Fit(None)),
-                inner,
-                protocol,
-            );
-            return;
+    if app.images_enabled() {
+        if let Some(url) = url {
+            if let Some(protocol) = app.image_mut(url) {
+                f.render_stateful_widget(
+                    StatefulImage::default().resize(Resize::Fit(None)),
+                    inner,
+                    protocol,
+                );
+                return;
+            }
         }
     }
     f.render_widget(
@@ -278,6 +342,9 @@ fn render_post_images(
     area: ratatui::layout::Rect,
     offset: usize,
 ) {
+    if !app.images_enabled() {
+        return;
+    }
     for placement in draw::image_placements(layouts, area, offset) {
         if let Some(protocol) = app.image_mut(&placement.url) {
             f.render_stateful_widget(

@@ -35,6 +35,47 @@ pub enum IoEvent {
     ToggleSavedFeed(crate::app::feed::FeedDescriptor),
     DeletePost(String),
     PreviewLink(String),
+    Feature(FeatureEvent),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum FeatureEvent {
+    Load(crate::app::feature_panel::FeatureSection),
+    OpenList(String),
+    OpenStarterPack(String),
+    OpenConversation(String),
+    OpenLabeler(atrium_api::types::string::Did),
+    Submit(crate::app::feature_panel::FeaturePromptAction, String),
+    DeleteRecord(String),
+    ToggleModerationList {
+        uri: String,
+        muted: bool,
+    },
+    ToggleConversationMute {
+        convo_id: String,
+        muted: bool,
+    },
+    RemoveMutedWord(String),
+    ToggleLabeler(atrium_api::types::string::Did),
+    UseListFeed {
+        uri: String,
+        name: String,
+    },
+    SaveList(String),
+    JoinStarterPack(Vec<atrium_api::types::string::AtIdentifier>),
+    SwitchAccount(String),
+    ToggleThreadMute {
+        root: String,
+        muted: bool,
+    },
+    ToggleHiddenReply {
+        root: Box<atrium_api::app::bsky::feed::defs::PostViewData>,
+        reply: String,
+    },
+    DetachQuote {
+        post: String,
+        quote: String,
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

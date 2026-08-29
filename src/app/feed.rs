@@ -2,6 +2,7 @@
 pub enum FeedKind {
     Following,
     Custom(String),
+    List(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,6 +34,17 @@ impl FeedDescriptor {
             name: "Discover".to_owned(),
             description: "Popular posts selected by Bluesky".to_owned(),
             kind: FeedKind::Custom(uri.to_owned()),
+            saved: false,
+            pinned: false,
+        }
+    }
+
+    pub fn list(uri: String, name: String) -> Self {
+        Self {
+            id: uri.clone(),
+            name,
+            description: "Posts from members of a curational list".to_owned(),
+            kind: FeedKind::List(uri),
             saved: false,
             pinned: false,
         }

@@ -5,7 +5,9 @@ use bsky_sdk::BskyAgent;
 use eyre::{eyre, Result, WrapErr};
 use tui_input::Input;
 
-use super::{InteractionKind, IoEvent, NotificationEvent, SearchEvent, TimelineEvent};
+use super::{
+    FeatureEvent, InteractionKind, IoEvent, NotificationEvent, SearchEvent, TimelineEvent,
+};
 use crate::{
     app::{
         auth::AuthCredentials, config::AppConfig, profile::ProfileSection, profile::ProfileState,
@@ -68,6 +70,7 @@ impl IoAsyncHandler {
             IoEvent::ToggleSavedFeed(feed) => self.do_toggle_saved_feed(feed).await,
             IoEvent::DeletePost(uri) => self.do_delete_post(uri).await,
             IoEvent::PreviewLink(url) => self.do_preview_link(url).await,
+            IoEvent::Feature(event) => self.handle_feature_event(event).await,
         };
 
         let mut app = self.app.lock().await;
@@ -89,13 +92,14 @@ impl IoAsyncHandler {
 
     async fn do_initialize(&mut self) -> Result<()> {
         let config = AppConfig::load()?;
-        let identifier = config.identifier.clone();
+        let account = config.active_account();
+        let identifier = account.identifier.clone();
         let credentials = tokio::task::spawn_blocking(move || AuthCredentials::load(&identifier))
             .await
             .wrap_err("credential lookup task failed")??;
         let (agent, session) = bsky::agent_with_session(
-            &config.service_url,
-            &config.identifier,
+            &account.service_url,
+            &account.identifier,
             credentials.app_password(),
         )
         .await?;
@@ -107,6 +111,7 @@ impl IoAsyncHandler {
                 session.handle.clone(),
                 session.did.clone(),
                 moderation,
+                config.ui.clone(),
             );
         }
         if self.do_load_feed_catalog(false).await.is_err() {
@@ -452,7 +457,7 @@ impl IoAsyncHandler {
             let app = self.app.lock().await;
             app.state.get_input().value().to_string()
         };
-        let drafts = crate::app::composer::parse_drafts(&text)?;
+        let drafts = drafts_with_default_language(&text)?;
         bsky::send_drafts(self.agent().await?.as_ref(), drafts, None).await?;
         self.finish_composer().await;
         self.do_load_timeline(TimelineEvent::Reload).await
@@ -695,7 +700,7 @@ impl IoAsyncHandler {
             uri: feed.post.uri.clone(),
         };
         let root = bsky::reply_root(&feed).unwrap_or_else(|| parent.clone());
-        let drafts = crate::app::composer::parse_drafts(&text)?;
+        let drafts = drafts_with_default_language(&text)?;
         bsky::send_drafts(
             self.agent().await?.as_ref(),
             drafts,
@@ -747,7 +752,7 @@ impl IoAsyncHandler {
             uri: post.uri.clone(),
         };
         let root = bsky::reply_root_for_post(self.agent().await?.as_ref(), &post).await?;
-        let drafts = crate::app::composer::parse_drafts(&text)?;
+        let drafts = drafts_with_default_language(&text)?;
         bsky::send_drafts(
             self.agent().await?.as_ref(),
             drafts,
@@ -769,6 +774,470 @@ impl IoAsyncHandler {
         app.state.set_mode(Mode::Normal);
         app.state.set_input(Input::default());
     }
+
+    async fn handle_feature_event(&mut self, event: FeatureEvent) -> Result<()> {
+        use crate::app::feature_panel::{FeaturePromptAction, FeatureSection, SettingKey};
+
+        match event {
+            FeatureEvent::Load(section) => self.load_feature_section(section).await,
+            FeatureEvent::OpenList(uri) => {
+                let did = self.app.lock().await.state.get_did();
+                let rows = bsky::feature_services::list_detail(
+                    self.agent().await?.as_ref(),
+                    uri.clone(),
+                    did,
+                )
+                .await?;
+                self.app
+                    .lock()
+                    .await
+                    .set_feature_rows(format!("List · {uri}"), rows, true);
+                Ok(())
+            }
+            FeatureEvent::OpenStarterPack(uri) => {
+                let rows = bsky::feature_services::starter_pack_detail(
+                    self.agent().await?.as_ref(),
+                    uri.clone(),
+                )
+                .await?;
+                self.app
+                    .lock()
+                    .await
+                    .set_feature_rows(format!("Starter Pack · {uri}"), rows, true);
+                Ok(())
+            }
+            FeatureEvent::OpenConversation(convo_id) => self.do_open_conversation(convo_id).await,
+            FeatureEvent::OpenLabeler(did) => {
+                let rows = bsky::feature_services::labeler_detail(
+                    self.agent().await?.as_ref(),
+                    did.clone(),
+                )
+                .await?;
+                self.app.lock().await.set_feature_rows(
+                    format!("Labeler · {}", did.as_str()),
+                    rows,
+                    true,
+                );
+                Ok(())
+            }
+            FeatureEvent::Submit(action, value) => {
+                let agent = self.agent().await?;
+                match action {
+                    FeaturePromptAction::CreateList => {
+                        let fields = crate::app::feature_panel::split_fields(&value, 2)
+                            .map_err(eyre::Report::msg)?;
+                        bsky::feature_services::create_list(
+                            agent.as_ref(),
+                            fields[0].clone(),
+                            fields[1].clone(),
+                            fields.get(2).cloned().filter(|value| !value.is_empty()),
+                        )
+                        .await?;
+                    }
+                    FeaturePromptAction::EditList { uri, purpose } => {
+                        let fields = crate::app::feature_panel::split_fields(&value, 1)
+                            .map_err(eyre::Report::msg)?;
+                        bsky::feature_services::edit_list(
+                            agent.as_ref(),
+                            &uri,
+                            purpose,
+                            fields[0].clone(),
+                            fields.get(1).cloned().filter(|value| !value.is_empty()),
+                        )
+                        .await?;
+                    }
+                    FeaturePromptAction::AddListMember { list_uri } => {
+                        let actor = value.parse().map_err(eyre::Report::msg)?;
+                        let profile = bsky::profile(agent.as_ref(), actor).await?;
+                        bsky::feature_services::add_list_member(
+                            agent.as_ref(),
+                            list_uri,
+                            profile.did.clone(),
+                        )
+                        .await?;
+                    }
+                    FeaturePromptAction::CreateStarterPack => {
+                        let fields = crate::app::feature_panel::split_fields(&value, 3)
+                            .map_err(eyre::Report::msg)?;
+                        bsky::feature_services::create_starter_pack(
+                            agent.as_ref(),
+                            fields[0].clone(),
+                            Some(fields[1].clone()).filter(|value| !value.is_empty()),
+                            fields[2].clone(),
+                        )
+                        .await?;
+                    }
+                    FeaturePromptAction::EditStarterPack { uri } => {
+                        let fields = crate::app::feature_panel::split_fields(&value, 3)
+                            .map_err(eyre::Report::msg)?;
+                        bsky::feature_services::edit_starter_pack(
+                            agent.as_ref(),
+                            &uri,
+                            fields[0].clone(),
+                            Some(fields[1].clone()).filter(|value| !value.is_empty()),
+                            fields[2].clone(),
+                        )
+                        .await?;
+                    }
+                    FeaturePromptAction::NewConversation => {
+                        let actor = value.parse().map_err(eyre::Report::msg)?;
+                        let profile = bsky::profile(agent.as_ref(), actor).await?;
+                        let convo_id = bsky::feature_services::start_conversation(
+                            agent.as_ref(),
+                            profile.did.clone(),
+                        )
+                        .await?;
+                        return self.do_open_conversation(convo_id).await;
+                    }
+                    FeaturePromptAction::SendMessage { convo_id } => {
+                        bsky::feature_services::send_dm(agent.as_ref(), convo_id.clone(), value)
+                            .await?;
+                        return self.do_open_conversation(convo_id).await;
+                    }
+                    FeaturePromptAction::AddMutedWord => {
+                        bsky::feature_services::add_muted_word(agent.as_ref(), value).await?;
+                    }
+                    FeaturePromptAction::AddLabeler => {
+                        let did = atrium_api::types::string::Did::new(value)
+                            .map_err(eyre::Report::msg)?;
+                        bsky::feature_services::toggle_labeler(agent.as_ref(), did).await?;
+                    }
+                    FeaturePromptAction::SetLabelVisibility { labeler, label } => {
+                        bsky::feature_services::set_label_visibility(
+                            agent.as_ref(),
+                            Some(labeler),
+                            label,
+                            value,
+                        )
+                        .await?;
+                    }
+                    FeaturePromptAction::Report { subject } => {
+                        let fields = crate::app::feature_panel::split_fields(&value, 1)
+                            .map_err(eyre::Report::msg)?;
+                        bsky::feature_services::report(
+                            agent.as_ref(),
+                            subject,
+                            &fields[0],
+                            fields.get(1).cloned(),
+                        )
+                        .await?;
+                        self.app.lock().await.feature_panel = None;
+                        return Ok(());
+                    }
+                    FeaturePromptAction::AddAccount => {
+                        let fields = crate::app::feature_panel::split_fields(&value, 2)
+                            .map_err(eyre::Report::msg)?;
+                        let mut config = crate::app::config::AppConfig::load()?;
+                        if !config
+                            .accounts
+                            .iter()
+                            .any(|account| account.identifier == fields[0])
+                        {
+                            config.accounts.push(crate::app::config::AccountConfig {
+                                identifier: fields[0].clone(),
+                                service_url: fields[1].clone(),
+                            });
+                        }
+                        config.save()?;
+                    }
+                    FeaturePromptAction::EditSetting(setting) => {
+                        if setting == SettingKey::IncomingDm {
+                            bsky::feature_services::set_incoming_dm(agent.as_ref(), value).await?;
+                        } else {
+                            let mut config = crate::app::config::AppConfig::load()?;
+                            match setting {
+                                SettingKey::Images => {
+                                    config.ui.show_images = value
+                                        .parse()
+                                        .map_err(|_| eyre!("images must be true or false"))?
+                                }
+                                SettingKey::DateFormat => config.ui.date_format = value,
+                                SettingKey::Language => config.ui.language = value,
+                                SettingKey::AccentColor => config.ui.accent_color = value,
+                                SettingKey::Keybindings => {
+                                    let fields = crate::app::feature_panel::split_fields(&value, 2)
+                                        .map_err(eyre::Report::msg)?;
+                                    config
+                                        .ui
+                                        .keybindings
+                                        .insert(fields[0].clone(), fields[1].clone());
+                                }
+                                SettingKey::IncomingDm => unreachable!(),
+                            }
+                            config.save()?;
+                            self.app.lock().await.set_ui_config(config.ui.clone());
+                        }
+                    }
+                }
+                let section = self
+                    .app
+                    .lock()
+                    .await
+                    .feature_panel()
+                    .map(|panel| panel.section)
+                    .unwrap_or(FeatureSection::Lists);
+                self.load_feature_section(section).await
+            }
+            FeatureEvent::DeleteRecord(uri) => {
+                bsky::feature_services::delete_record(self.agent().await?.as_ref(), &uri).await?;
+                let section = self
+                    .app
+                    .lock()
+                    .await
+                    .feature_panel()
+                    .map(|p| p.section)
+                    .unwrap_or(FeatureSection::Lists);
+                self.load_feature_section(section).await
+            }
+            FeatureEvent::ToggleModerationList { uri, muted } => {
+                bsky::feature_services::toggle_moderation_list(
+                    self.agent().await?.as_ref(),
+                    uri,
+                    muted,
+                )
+                .await?;
+                self.load_feature_section(FeatureSection::Lists).await
+            }
+            FeatureEvent::ToggleConversationMute { convo_id, muted } => {
+                bsky::feature_services::toggle_conversation_mute(
+                    self.agent().await?.as_ref(),
+                    convo_id,
+                    muted,
+                )
+                .await?;
+                self.load_feature_section(FeatureSection::DirectMessages)
+                    .await
+            }
+            FeatureEvent::RemoveMutedWord(word) => {
+                bsky::feature_services::remove_muted_word(self.agent().await?.as_ref(), &word)
+                    .await?;
+                self.load_feature_section(FeatureSection::Moderation).await
+            }
+            FeatureEvent::ToggleLabeler(did) => {
+                bsky::feature_services::toggle_labeler(self.agent().await?.as_ref(), did).await?;
+                self.load_feature_section(FeatureSection::Moderation).await
+            }
+            FeatureEvent::UseListFeed { uri, name } => {
+                self.app
+                    .lock()
+                    .await
+                    .state
+                    .activate_feed(crate::app::feed::FeedDescriptor::list(uri, name));
+                self.do_load_timeline(TimelineEvent::Load).await
+            }
+            FeatureEvent::SaveList(uri) => {
+                let mut config = crate::app::config::AppConfig::load()?;
+                if config.saved_lists.iter().any(|saved| saved == &uri) {
+                    config.saved_lists.retain(|saved| saved != &uri);
+                } else {
+                    config.saved_lists.push(uri);
+                }
+                config.save()?;
+                self.load_feature_section(FeatureSection::Lists).await
+            }
+            FeatureEvent::JoinStarterPack(actors) => {
+                let agent = self.agent().await?;
+                for actor in actors {
+                    let profile = bsky::profile(agent.as_ref(), actor).await?;
+                    if profile
+                        .viewer
+                        .as_ref()
+                        .and_then(|viewer| viewer.following.as_ref())
+                        .is_none()
+                    {
+                        bsky::toggle_follow(agent.as_ref(), &profile).await?;
+                    }
+                }
+                Ok(())
+            }
+            FeatureEvent::SwitchAccount(identifier) => {
+                let mut config = crate::app::config::AppConfig::load()?;
+                config.active_account = Some(identifier);
+                config.save()?;
+                self.app.lock().await.feature_panel = None;
+                self.do_initialize().await
+            }
+            FeatureEvent::ToggleThreadMute { root, muted } => {
+                bsky::feature_services::toggle_thread_mute(
+                    self.agent().await?.as_ref(),
+                    root.clone(),
+                    muted,
+                )
+                .await?;
+                let mut config = crate::app::config::AppConfig::load()?;
+                if muted {
+                    config.muted_threads.retain(|uri| uri != &root);
+                } else if !config.muted_threads.contains(&root) {
+                    config.muted_threads.push(root);
+                }
+                config.save()?;
+                if self.app.lock().await.feature_panel().is_some() {
+                    self.load_feature_section(crate::app::feature_panel::FeatureSection::Moderation)
+                        .await
+                } else {
+                    Ok(())
+                }
+            }
+            FeatureEvent::ToggleHiddenReply { root, reply } => {
+                let uri = root.uri.clone();
+                bsky::feature_services::toggle_hidden_reply(
+                    self.agent().await?.as_ref(),
+                    &root,
+                    reply,
+                )
+                .await?;
+                self.do_load_thread(uri).await
+            }
+            FeatureEvent::DetachQuote { post, quote } => {
+                bsky::feature_services::detach_quote(
+                    self.agent().await?.as_ref(),
+                    post,
+                    quote.clone(),
+                )
+                .await?;
+                self.do_load_thread(quote).await
+            }
+        }
+    }
+
+    async fn load_feature_section(
+        &mut self,
+        section: crate::app::feature_panel::FeatureSection,
+    ) -> Result<()> {
+        use crate::app::feature_panel::{FeatureRow, FeatureSection, FeatureTarget, SettingKey};
+        let did = self.app.lock().await.state.get_did();
+        let rows = match section {
+            FeatureSection::Lists => {
+                let agent = self.agent().await?;
+                let mut rows =
+                    bsky::feature_services::own_lists(agent.as_ref(), did.clone()).await?;
+                let config = crate::app::config::AppConfig::load()?;
+                for uri in config.saved_lists {
+                    if !rows.iter().any(|row| matches!(&row.target, FeatureTarget::List { uri: existing, .. } if existing == &uri)) {
+                        if let Ok(row) = bsky::feature_services::list_overview(agent.as_ref(), uri, &did).await {
+                            rows.push(row);
+                        }
+                    }
+                }
+                rows
+            }
+            FeatureSection::StarterPacks => {
+                bsky::feature_services::starter_packs(self.agent().await?.as_ref(), did).await?
+            }
+            FeatureSection::Discovery => {
+                bsky::feature_services::discovery(self.agent().await?.as_ref(), did).await?
+            }
+            FeatureSection::DirectMessages => {
+                bsky::feature_services::conversations(self.agent().await?.as_ref(), &did).await?
+            }
+            FeatureSection::Moderation => {
+                let mut rows = bsky::feature_services::moderation_preferences_rows(
+                    self.agent().await?.as_ref(),
+                )
+                .await?;
+                let config = crate::app::config::AppConfig::load()?;
+                rows.extend(config.muted_threads.into_iter().map(|uri| FeatureRow {
+                    title: "Muted thread".into(),
+                    detail: uri.clone(),
+                    target: FeatureTarget::MutedThread(uri),
+                    unread: false,
+                }));
+                rows
+            }
+            FeatureSection::Settings => {
+                let config = crate::app::config::AppConfig::load()?;
+                let mut rows = config
+                    .all_accounts()
+                    .into_iter()
+                    .map(|account| FeatureRow {
+                        title: format!(
+                            "{}{}",
+                            if config.active_account().identifier == account.identifier {
+                                "● "
+                            } else {
+                                "  "
+                            },
+                            account.identifier
+                        ),
+                        detail: account.service_url,
+                        target: FeatureTarget::Account(account.identifier),
+                        unread: false,
+                    })
+                    .collect::<Vec<_>>();
+                rows.extend([
+                    setting_row(
+                        "Images",
+                        config.ui.show_images.to_string(),
+                        SettingKey::Images,
+                    ),
+                    setting_row("Date format", config.ui.date_format, SettingKey::DateFormat),
+                    setting_row("Language", config.ui.language, SettingKey::Language),
+                    setting_row(
+                        "Accent color",
+                        config.ui.accent_color,
+                        SettingKey::AccentColor,
+                    ),
+                    setting_row("Keybinding", "action | key".into(), SettingKey::Keybindings),
+                    setting_row(
+                        "Incoming DMs",
+                        "all / following / none".into(),
+                        SettingKey::IncomingDm,
+                    ),
+                ]);
+                rows
+            }
+        };
+        self.app
+            .lock()
+            .await
+            .set_feature_rows(section.title().to_owned(), rows, false);
+        Ok(())
+    }
+
+    async fn do_open_conversation(&mut self, convo_id: String) -> Result<()> {
+        let rows =
+            bsky::feature_services::conversation(self.agent().await?.as_ref(), convo_id.clone())
+                .await?;
+        let child = self
+            .app
+            .lock()
+            .await
+            .feature_panel()
+            .is_some_and(|panel| !panel.title.starts_with("Conversation ·"));
+        self.app
+            .lock()
+            .await
+            .set_feature_rows(format!("Conversation · {convo_id}"), rows, child);
+        Ok(())
+    }
+}
+
+fn setting_row(
+    title: &str,
+    value: String,
+    key: crate::app::feature_panel::SettingKey,
+) -> crate::app::feature_panel::FeatureRow {
+    crate::app::feature_panel::FeatureRow {
+        title: title.to_owned(),
+        detail: value,
+        target: crate::app::feature_panel::FeatureTarget::Setting(key),
+        unread: false,
+    }
+}
+
+fn drafts_with_default_language(text: &str) -> Result<Vec<crate::app::composer::PostDraft>> {
+    let mut drafts = crate::app::composer::parse_drafts(text)?;
+    let language = crate::app::config::AppConfig::load()?.ui.language;
+    if language != "auto" && !language.trim().is_empty() {
+        let language =
+            atrium_api::types::string::Language::new(language).map_err(eyre::Report::msg)?;
+        for draft in &mut drafts {
+            if draft.langs.is_none() {
+                draft.langs = Some(vec![language.clone()]);
+            }
+        }
+    }
+    Ok(drafts)
 }
 
 fn updated_cursors(
@@ -824,6 +1293,7 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::DeletePost(_) => "Delete post",
         IoEvent::PreviewLink(_) => "Link preview",
         IoEvent::Search(_) => "Search",
+        IoEvent::Feature(_) => "Extended client request",
     }
 }
 

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod composer;
 pub mod config;
+pub mod feature_panel;
 pub mod feed;
 pub mod images;
 pub mod moderation;
@@ -10,7 +11,7 @@ pub mod state;
 pub mod thread;
 pub mod ui;
 
-use atrium_api::types::string::{Did, Handle};
+use atrium_api::types::string::{AtIdentifier, Did, Handle};
 use bsky_sdk::BskyAgent;
 use ratatui::widgets::TableState;
 use tui_input::{Input, InputRequest};
@@ -22,7 +23,8 @@ use crate::{
     bsky,
     inputs::key::Key,
     io::{
-        InteractionKind, IoEvent, ModerationAction, NotificationEvent, SearchEvent, TimelineEvent,
+        FeatureEvent, InteractionKind, IoEvent, ModerationAction, NotificationEvent, SearchEvent,
+        TimelineEvent,
     },
 };
 
@@ -109,6 +111,8 @@ pub struct App {
     pub(crate) notification_settings: Option<notifications::NotificationSettings>,
     pub(crate) help_table_state: TableState,
     help_return_mode: state::Mode,
+    pub(crate) feature_panel: Option<feature_panel::FeaturePanel>,
+    ui_config: config::UiConfig,
 }
 
 impl App {
@@ -133,6 +137,8 @@ impl App {
             notification_settings: None,
             help_table_state: TableState::default().with_selected(Some(0)),
             help_return_mode: state::Mode::Normal,
+            feature_panel: None,
+            ui_config: config::UiConfig::default(),
         }
     }
 
@@ -167,6 +173,12 @@ impl App {
         if self.notification_settings.is_some() {
             return "↑/↓ category   Space list   p push   i audience   v activity   Esc close";
         }
+        if let Some(panel) = self.feature_panel.as_ref() {
+            if panel.prompt.is_some() {
+                return "Enter submit   Esc cancel   ←/→ move cursor";
+            }
+            return "1 Lists  2 Packs  3 Discover  4 DM  5 Safety  6 Settings   ? help";
+        }
         if self.state.is_help_mode() {
             return "↑/↓ move   PgUp/PgDn jump   Esc close";
         }
@@ -191,7 +203,7 @@ impl App {
                 "↑/↓ select   ←/→ section   Enter open   i image   Esc back   ? help"
             }
             state::Mode::Thread => {
-                "↑/↓ select   i image   o browser   a author   Esc back   ? help"
+                "↑/↓ select   H hide reply   M mute thread   Ctrl+D detach quote   Esc back"
             }
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => "↑/↓ select   Enter thread   n post   r reply   Tab switch   ? help",
@@ -261,6 +273,9 @@ impl App {
         if self.notification_settings.is_some() {
             return self.notification_settings_action(key).await;
         }
+        if self.feature_panel.is_some() {
+            return self.feature_panel_action(key).await;
+        }
         if self.feed_viewer.is_some() && !self.state.is_feed_search_mode() {
             return self.feed_viewer_action(key).await;
         }
@@ -273,6 +288,26 @@ impl App {
         }
         if self.interaction_viewer.is_some() {
             return self.interaction_viewer_action(key).await;
+        }
+
+        if self.state.get_mode() == state::Mode::Normal {
+            let section = if self.configured_key("open_lists", key, Key::Char('g')) {
+                Some(feature_panel::FeatureSection::Lists)
+            } else if self.configured_key("open_dm", key, Key::Char('d')) {
+                Some(feature_panel::FeatureSection::DirectMessages)
+            } else if self.configured_key("open_moderation", key, Key::Char(';')) {
+                Some(feature_panel::FeatureSection::Moderation)
+            } else if self.configured_key("open_settings", key, Key::Char(',')) {
+                Some(feature_panel::FeatureSection::Settings)
+            } else {
+                None
+            };
+            if let Some(section) = section {
+                self.feature_panel = Some(feature_panel::FeaturePanel::loading(section));
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(section)))
+                    .await;
+                return AppReturn::Continue;
+            }
         }
 
         match self.state.get_mode() {
@@ -909,6 +944,63 @@ impl App {
                     self.request_post_moderation(&post, key);
                 }
             }
+            Key::Char('H') => {
+                let selected = self.state.get_current_thread_post();
+                let did = self.state.get_did();
+                let root = self
+                    .state
+                    .get_thread()
+                    .into_iter()
+                    .filter_map(|entry| entry.post().cloned())
+                    .find(|post| post.author.did == did);
+                if let (Some(root), Some(reply)) = (root, selected) {
+                    if root.uri != reply.uri {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::ToggleHiddenReply {
+                            root: Box::new(root),
+                            reply: reply.uri,
+                        }))
+                        .await;
+                    } else {
+                        self.set_error("Select a reply beneath one of your posts".into());
+                    }
+                } else {
+                    self.set_error("Hide reply is only available on your own thread".into());
+                }
+            }
+            Key::Char('M') => {
+                if let Some(root) = self
+                    .state
+                    .get_thread()
+                    .into_iter()
+                    .find_map(|entry| entry.post().cloned())
+                {
+                    let muted = config::AppConfig::load()
+                        .map(|config| config.muted_threads.contains(&root.uri))
+                        .unwrap_or(false);
+                    self.dispatch(IoEvent::Feature(FeatureEvent::ToggleThreadMute {
+                        root: root.uri,
+                        muted,
+                    }))
+                    .await;
+                }
+            }
+            Key::Ctrl('d') => {
+                if let Some(quote) = self.state.get_current_thread_post() {
+                    if let Some((post, author)) = bsky::quoted_post(&quote) {
+                        if author == self.state.get_did() {
+                            self.dispatch(IoEvent::Feature(FeatureEvent::DetachQuote {
+                                post,
+                                quote: quote.uri,
+                            }))
+                            .await;
+                        } else {
+                            self.set_error("Only quotes of your own post can be detached".into());
+                        }
+                    } else {
+                        self.set_error("The selected post is not a quote post".into());
+                    }
+                }
+            }
             Key::Char('L') | Key::Char('R') | Key::Char('Q') => {
                 if let Some(post) = self.state.get_current_thread_post() {
                     self.dispatch(IoEvent::LoadInteractions(
@@ -965,13 +1057,14 @@ impl App {
         post: &atrium_api::app::bsky::feed::defs::PostViewData,
         key: Key,
     ) {
-        self.pending_confirmation = Some(match key {
-            Key::Char('!') => ModerationAction::ReportPost {
+        if key == Key::Char('!') {
+            self.open_report_prompt(feature_panel::ReportSubject::Record {
                 uri: post.uri.clone(),
                 cid: post.cid.clone(),
-            },
-            _ => actor_moderation_action(&post.author, key),
-        });
+            });
+            return;
+        }
+        self.pending_confirmation = Some(actor_moderation_action(&post.author, key));
     }
 
     fn request_profile_moderation(
@@ -979,6 +1072,10 @@ impl App {
         profile: &atrium_api::app::bsky::actor::defs::ProfileViewDetailedData,
         key: Key,
     ) {
+        if key == Key::Char('!') {
+            self.open_report_prompt(feature_panel::ReportSubject::Account(profile.did.clone()));
+            return;
+        }
         let viewer = profile.viewer.as_ref();
         self.pending_confirmation = Some(match key {
             Key::Char('m') => ModerationAction::MuteActor {
@@ -991,6 +1088,19 @@ impl App {
             },
             _ => ModerationAction::ReportActor(profile.did.clone()),
         });
+    }
+
+    fn open_report_prompt(&mut self, subject: feature_panel::ReportSubject) {
+        let mut panel =
+            feature_panel::FeaturePanel::loading(feature_panel::FeatureSection::Moderation);
+        panel.title = "Report content".into();
+        panel.prompt = Some(feature_panel::FeaturePrompt {
+            label: "Report".into(),
+            help: "spam|rude|sexual|violation|misleading|other | details".into(),
+            action: feature_panel::FeaturePromptAction::Report { subject },
+            input: Input::new("other | ".into()),
+        });
+        self.feature_panel = Some(panel);
     }
 
     fn request_delete(&mut self, post: &atrium_api::app::bsky::feed::defs::PostViewData) {
@@ -1362,6 +1472,471 @@ impl App {
         AppReturn::Continue
     }
 
+    async fn feature_panel_action(&mut self, key: Key) -> AppReturn {
+        if self
+            .feature_panel
+            .as_ref()
+            .and_then(|panel| panel.prompt.as_ref())
+            .is_some()
+        {
+            return self.feature_prompt_action(key).await;
+        }
+
+        let section = match key {
+            Key::Char('1') => Some(feature_panel::FeatureSection::Lists),
+            Key::Char('2') => Some(feature_panel::FeatureSection::StarterPacks),
+            Key::Char('3') => Some(feature_panel::FeatureSection::Discovery),
+            Key::Char('4') => Some(feature_panel::FeatureSection::DirectMessages),
+            Key::Char('5') => Some(feature_panel::FeatureSection::Moderation),
+            Key::Char('6') => Some(feature_panel::FeatureSection::Settings),
+            _ => None,
+        };
+        if let Some(section) = section {
+            self.feature_panel = Some(feature_panel::FeaturePanel::loading(section));
+            self.dispatch(IoEvent::Feature(FeatureEvent::Load(section)))
+                .await;
+            return AppReturn::Continue;
+        }
+
+        let selected = self
+            .feature_panel
+            .as_ref()
+            .and_then(feature_panel::FeaturePanel::selected_row)
+            .cloned();
+        match key {
+            Key::Esc => {
+                let parent = self
+                    .feature_panel
+                    .as_mut()
+                    .and_then(|panel| panel.parent.take())
+                    .map(|parent| *parent);
+                if let Some(parent) = parent {
+                    self.feature_panel = Some(parent);
+                } else {
+                    self.feature_panel = None;
+                }
+            }
+            Key::Char('k') | Key::Up => {
+                if let Some(panel) = self.feature_panel.as_mut() {
+                    panel.previous();
+                }
+            }
+            Key::Char('j') | Key::Down => {
+                if let Some(panel) = self.feature_panel.as_mut() {
+                    panel.next();
+                }
+            }
+            Key::Enter | Key::Char('o') => match selected.map(|row| row.target) {
+                Some(feature_panel::FeatureTarget::List { uri, .. }) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::OpenList(uri)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::StarterPack { uri, .. }) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::OpenStarterPack(uri)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::Conversation { id, .. }) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::OpenConversation(id)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::Labeler(did)) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::OpenLabeler(did)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::Actor(actor))
+                | Some(feature_panel::FeatureTarget::ListMember { actor, .. }) => {
+                    self.feature_panel = None;
+                    self.dispatch(IoEvent::LoadProfile(actor)).await;
+                }
+                Some(feature_panel::FeatureTarget::Topic(topic)) => {
+                    self.feature_panel = None;
+                    self.state.set_search_query(Some(topic.clone()));
+                    self.state.set_tab(Tab::Search);
+                    self.dispatch(IoEvent::Search(SearchEvent::Load(topic)))
+                        .await;
+                }
+                Some(feature_panel::FeatureTarget::Account(identifier)) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::SwitchAccount(identifier)))
+                        .await;
+                }
+                Some(feature_panel::FeatureTarget::Setting(setting)) => {
+                    self.open_feature_prompt(
+                        format!("Set {:?}", setting),
+                        "Enter the new value".into(),
+                        feature_panel::FeaturePromptAction::EditSetting(setting),
+                        String::new(),
+                    );
+                }
+                _ => {}
+            },
+            Key::Char('n') => {
+                let section = self.feature_panel.as_ref().map(|panel| panel.section);
+                match section {
+                    Some(feature_panel::FeatureSection::Lists) => self.open_feature_prompt(
+                        "Create list".into(),
+                        "curation|moderation | name | description".into(),
+                        feature_panel::FeaturePromptAction::CreateList,
+                        "curation | ".into(),
+                    ),
+                    Some(feature_panel::FeatureSection::StarterPacks) => self.open_feature_prompt(
+                        "Create Starter Pack".into(),
+                        "name | description | list AT-URI".into(),
+                        feature_panel::FeaturePromptAction::CreateStarterPack,
+                        String::new(),
+                    ),
+                    Some(feature_panel::FeatureSection::DirectMessages) => self
+                        .open_feature_prompt(
+                            "New conversation".into(),
+                            "Handle or DID".into(),
+                            feature_panel::FeaturePromptAction::NewConversation,
+                            String::new(),
+                        ),
+                    Some(feature_panel::FeatureSection::Moderation) => self.open_feature_prompt(
+                        "Mute word".into(),
+                        "Word or phrase".into(),
+                        feature_panel::FeaturePromptAction::AddMutedWord,
+                        String::new(),
+                    ),
+                    Some(feature_panel::FeatureSection::Settings) => self.open_feature_prompt(
+                        "Add account".into(),
+                        "identifier | service URL (save credentials separately)".into(),
+                        feature_panel::FeaturePromptAction::AddAccount,
+                        String::new(),
+                    ),
+                    _ => {}
+                }
+            }
+            Key::Char('a') => {
+                if let Some(feature_panel::FeatureTarget::List {
+                    uri, owned: true, ..
+                }) = selected.map(|row| row.target)
+                {
+                    self.open_feature_prompt(
+                        "Add list member".into(),
+                        "Handle or DID".into(),
+                        feature_panel::FeaturePromptAction::AddListMember { list_uri: uri },
+                        String::new(),
+                    );
+                }
+            }
+            Key::Char('e') => match selected.map(|row| row.target) {
+                Some(feature_panel::FeatureTarget::List {
+                    uri,
+                    purpose,
+                    owned: true,
+                    ..
+                }) => self.open_feature_prompt(
+                    "Edit list".into(),
+                    "name | description".into(),
+                    feature_panel::FeaturePromptAction::EditList { uri, purpose },
+                    String::new(),
+                ),
+                Some(feature_panel::FeatureTarget::StarterPack {
+                    uri, owned: true, ..
+                }) => self.open_feature_prompt(
+                    "Edit Starter Pack".into(),
+                    "name | description | list AT-URI".into(),
+                    feature_panel::FeaturePromptAction::EditStarterPack { uri },
+                    String::new(),
+                ),
+                Some(feature_panel::FeatureTarget::LabelSetting { labeler, label }) => self
+                    .open_feature_prompt(
+                        format!("Label visibility · {label}"),
+                        "ignore / warn / hide".into(),
+                        feature_panel::FeaturePromptAction::SetLabelVisibility { labeler, label },
+                        "warn".into(),
+                    ),
+                _ => {}
+            },
+            Key::Char('x') | Key::Delete => match selected.map(|row| row.target) {
+                Some(feature_panel::FeatureTarget::List {
+                    uri, owned: true, ..
+                })
+                | Some(feature_panel::FeatureTarget::StarterPack {
+                    uri, owned: true, ..
+                }) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::DeleteRecord(uri)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::ListMember { item_uri, .. }) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::DeleteRecord(item_uri)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::MutedWord(word)) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::RemoveMutedWord(word)))
+                        .await
+                }
+                Some(feature_panel::FeatureTarget::MutedThread(root)) => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::ToggleThreadMute {
+                        root,
+                        muted: true,
+                    }))
+                    .await
+                }
+                _ => {}
+            },
+            Key::Char('s') => {
+                if let Some(feature_panel::FeatureTarget::List {
+                    uri,
+                    purpose,
+                    muted,
+                    ..
+                }) = selected.map(|row| row.target)
+                {
+                    if purpose == atrium_api::app::bsky::graph::defs::MODLIST {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::ToggleModerationList {
+                            uri,
+                            muted,
+                        }))
+                        .await;
+                    } else {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::SaveList(uri)))
+                            .await;
+                    }
+                }
+            }
+            Key::Char('f') => {
+                if let Some(row) = selected {
+                    if let feature_panel::FeatureTarget::List { uri, purpose, .. } = row.target {
+                        if purpose == atrium_api::app::bsky::graph::defs::CURATELIST {
+                            self.feature_panel = None;
+                            self.dispatch(IoEvent::Feature(FeatureEvent::UseListFeed {
+                                uri,
+                                name: row.title,
+                            }))
+                            .await;
+                        }
+                    }
+                }
+            }
+            Key::Char('l') => {
+                if let Some(feature_panel::FeatureTarget::Labeler(did)) =
+                    selected.map(|row| row.target)
+                {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::ToggleLabeler(did)))
+                        .await;
+                }
+            }
+            Key::Char('L') => {
+                if self
+                    .feature_panel
+                    .as_ref()
+                    .is_some_and(|panel| panel.section == feature_panel::FeatureSection::Moderation)
+                {
+                    self.open_feature_prompt(
+                        "Subscribe to labeler".into(),
+                        "Labeler DID".into(),
+                        feature_panel::FeaturePromptAction::AddLabeler,
+                        String::new(),
+                    );
+                }
+            }
+            Key::Char('J') => {
+                if self.feature_panel.as_ref().is_some_and(|panel| {
+                    panel.section == feature_panel::FeatureSection::StarterPacks
+                }) {
+                    let actors = self
+                        .feature_panel
+                        .as_ref()
+                        .map(|panel| {
+                            panel
+                                .rows
+                                .iter()
+                                .filter_map(|row| match &row.target {
+                                    feature_panel::FeatureTarget::Actor(actor) => {
+                                        Some(actor.clone())
+                                    }
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    if actors.is_empty() {
+                        self.set_error("Open a Starter Pack before joining it".into());
+                    } else {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::JoinStarterPack(actors)))
+                            .await;
+                    }
+                }
+            }
+            Key::Char(' ') => {
+                if let Some(feature_panel::FeatureTarget::Conversation { id, muted, .. }) =
+                    selected.map(|row| row.target)
+                {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::ToggleConversationMute {
+                        convo_id: id,
+                        muted,
+                    }))
+                    .await;
+                }
+            }
+            Key::Char('w') => {
+                let convo_id = match selected.map(|row| row.target) {
+                    Some(feature_panel::FeatureTarget::Conversation { id, .. }) => Some(id),
+                    Some(feature_panel::FeatureTarget::Message { convo_id, .. }) => Some(convo_id),
+                    _ => None,
+                }
+                .or_else(|| {
+                    self.feature_panel.as_ref().and_then(|panel| {
+                        panel
+                            .title
+                            .strip_prefix("Conversation · ")
+                            .map(str::to_owned)
+                    })
+                });
+                if let Some(convo_id) = convo_id {
+                    self.open_feature_prompt(
+                        "Send message".into(),
+                        "Text message (1000 characters maximum)".into(),
+                        feature_panel::FeaturePromptAction::SendMessage { convo_id },
+                        String::new(),
+                    );
+                }
+            }
+            Key::Char('r') => {
+                let subject = match selected.map(|row| row.target) {
+                    Some(feature_panel::FeatureTarget::Actor(AtIdentifier::Did(did)))
+                    | Some(feature_panel::FeatureTarget::ListMember {
+                        actor: AtIdentifier::Did(did),
+                        ..
+                    }) => Some(feature_panel::ReportSubject::Account(did)),
+                    Some(feature_panel::FeatureTarget::Message {
+                        convo_id,
+                        id,
+                        sender,
+                    }) => Some(feature_panel::ReportSubject::Conversation {
+                        convo_id,
+                        message_id: Some(format!("{id}@{}", sender.as_str())),
+                        sender,
+                    }),
+                    Some(feature_panel::FeatureTarget::List { uri, cid, .. })
+                    | Some(feature_panel::FeatureTarget::StarterPack { uri, cid, .. }) => {
+                        Some(feature_panel::ReportSubject::Record { uri, cid })
+                    }
+                    Some(feature_panel::FeatureTarget::Conversation { id, members, .. }) => members
+                        .into_iter()
+                        .next()
+                        .map(|sender| feature_panel::ReportSubject::Conversation {
+                            convo_id: id,
+                            message_id: None,
+                            sender,
+                        }),
+                    _ => None,
+                };
+                if let Some(subject) = subject {
+                    self.open_feature_prompt(
+                        "Report".into(),
+                        "spam|rude|sexual|violation|misleading|other | details".into(),
+                        feature_panel::FeaturePromptAction::Report { subject },
+                        "other | ".into(),
+                    );
+                }
+            }
+            Key::Char('b') => {
+                let did = match selected.map(|row| row.target) {
+                    Some(feature_panel::FeatureTarget::Actor(AtIdentifier::Did(did)))
+                    | Some(feature_panel::FeatureTarget::ListMember {
+                        actor: AtIdentifier::Did(did),
+                        ..
+                    }) => Some(did),
+                    Some(feature_panel::FeatureTarget::Conversation { members, .. }) => {
+                        members.into_iter().next()
+                    }
+                    Some(feature_panel::FeatureTarget::Message { sender, .. }) => Some(sender),
+                    _ => None,
+                };
+                if let Some(did) = did {
+                    self.pending_confirmation = Some(ModerationAction::BlockActor {
+                        did,
+                        blocking_uri: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    async fn feature_prompt_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => {
+                if let Some(panel) = self.feature_panel.as_mut() {
+                    panel.prompt = None;
+                }
+            }
+            Key::Enter => {
+                let submitted = self.feature_panel.as_mut().and_then(|panel| {
+                    panel
+                        .prompt
+                        .take()
+                        .map(|prompt| (prompt.action, prompt.input.value().trim().to_owned()))
+                });
+                if let Some((action, value)) = submitted {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::Submit(action, value)))
+                        .await;
+                }
+            }
+            Key::Left | Key::Ctrl('b') => self.with_feature_input(InputRequest::GoToPrevChar),
+            Key::Right | Key::Ctrl('f') => self.with_feature_input(InputRequest::GoToNextChar),
+            Key::Ctrl('a') => self.with_feature_input(InputRequest::GoToStart),
+            Key::Ctrl('e') => self.with_feature_input(InputRequest::GoToEnd),
+            Key::Backspace | Key::Ctrl('h') => {
+                self.with_feature_input(InputRequest::DeletePrevChar)
+            }
+            Key::Char(character) => {
+                self.with_feature_input(InputRequest::InsertChar(character));
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    fn with_feature_input(&mut self, request: InputRequest) {
+        if let Some(prompt) = self
+            .feature_panel
+            .as_mut()
+            .and_then(|panel| panel.prompt.as_mut())
+        {
+            prompt.input.handle(request);
+        }
+    }
+
+    fn open_feature_prompt(
+        &mut self,
+        label: String,
+        help: String,
+        action: feature_panel::FeaturePromptAction,
+        initial: String,
+    ) {
+        if let Some(panel) = self.feature_panel.as_mut() {
+            panel.prompt = Some(feature_panel::FeaturePrompt {
+                label,
+                help,
+                action,
+                input: Input::new(initial),
+            });
+        }
+    }
+
+    pub fn set_feature_rows(
+        &mut self,
+        title: String,
+        rows: Vec<feature_panel::FeatureRow>,
+        child: bool,
+    ) {
+        if let Some(panel) = self.feature_panel.as_mut() {
+            if child {
+                *panel = panel.child(title, rows);
+            } else {
+                panel.replace(title, rows);
+            }
+        }
+    }
+
+    pub fn feature_panel(&self) -> Option<&feature_panel::FeaturePanel> {
+        self.feature_panel.as_ref()
+    }
+
     async fn feed_viewer_action(&mut self, key: Key) -> AppReturn {
         match key {
             Key::Esc => self.feed_viewer = None,
@@ -1398,6 +1973,21 @@ impl App {
                     if matches!(feed.kind, feed::FeedKind::Custom(_)) {
                         self.dispatch(IoEvent::ToggleSavedFeed(feed)).await;
                     }
+                }
+            }
+            Key::Char('!') => {
+                let feed = self
+                    .feed_viewer
+                    .as_ref()
+                    .and_then(|viewer| viewer.items.get(viewer.index))
+                    .cloned();
+                if let Some(feed::FeedDescriptor {
+                    kind: feed::FeedKind::Custom(uri),
+                    ..
+                }) = feed
+                {
+                    self.feed_viewer = None;
+                    self.open_report_prompt(feature_panel::ReportSubject::Feed(uri));
                 }
             }
             Key::Char('/') => {
@@ -1576,8 +2166,38 @@ impl App {
         handle: Handle,
         did: Did,
         moderation: moderation::ModerationPrefs,
+        ui_config: config::UiConfig,
     ) {
         self.state = AppState::initialized(agent, handle, did, moderation);
+        self.ui_config = ui_config;
+    }
+
+    pub fn images_enabled(&self) -> bool {
+        self.ui_config.show_images
+    }
+
+    pub fn accent_color(&self) -> ratatui::style::Color {
+        match self.ui_config.accent_color.to_ascii_lowercase().as_str() {
+            "red" => ratatui::style::Color::Red,
+            "green" => ratatui::style::Color::Green,
+            "yellow" => ratatui::style::Color::Yellow,
+            "magenta" => ratatui::style::Color::Magenta,
+            "cyan" => ratatui::style::Color::Cyan,
+            "white" => ratatui::style::Color::White,
+            _ => ratatui::style::Color::Blue,
+        }
+    }
+
+    pub fn set_ui_config(&mut self, ui_config: config::UiConfig) {
+        self.ui_config = ui_config;
+    }
+
+    fn configured_key(&self, action: &str, key: Key, default: Key) -> bool {
+        self.ui_config
+            .keybindings
+            .get(action)
+            .map(|binding| binding_matches(binding, key))
+            .unwrap_or(key == default)
     }
 
     pub fn loaded(&mut self) {
@@ -1607,6 +2227,24 @@ fn actor_moderation_action(
             did: actor.did.clone(),
             blocking_uri: viewer.and_then(|viewer| viewer.blocking.clone()),
         },
+    }
+}
+
+fn binding_matches(binding: &str, key: Key) -> bool {
+    let binding = binding.trim().to_ascii_lowercase();
+    match key {
+        Key::Char(character) => binding == character.to_string(),
+        Key::Ctrl(character) => binding == format!("ctrl+{character}"),
+        Key::Alt(character) => binding == format!("alt+{character}"),
+        Key::Enter => binding == "enter",
+        Key::Esc => binding == "esc",
+        Key::Tab => binding == "tab",
+        Key::Up => binding == "up",
+        Key::Down => binding == "down",
+        Key::Left => binding == "left",
+        Key::Right => binding == "right",
+        Key::F1 => binding == "f1",
+        _ => false,
     }
 }
 

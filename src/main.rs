@@ -85,26 +85,31 @@ fn credentials_command() -> Command {
 
 fn set_credentials() -> eyre::Result<()> {
     let config = load_checked_config()?;
+    let account = config.active_account();
     let password = zeroize::Zeroizing::new(rpassword::prompt_password("Bluesky App Password: ")?);
     let confirmation =
         zeroize::Zeroizing::new(rpassword::prompt_password("Confirm App Password: ")?);
     if password.as_str() != confirmation.as_str() {
         eyre::bail!("App Passwords do not match");
     }
-    AuthCredentials::save(&config.identifier, password.as_str())?;
+    AuthCredentials::save(&account.identifier, password.as_str())?;
     println!(
         "App Password saved in the OS keyring for {}.",
-        config.identifier
+        account.identifier
     );
     Ok(())
 }
 
 fn delete_credentials() -> eyre::Result<()> {
     let config = load_checked_config()?;
-    if AuthCredentials::delete(&config.identifier)? {
-        println!("Saved App Password deleted for {}.", config.identifier);
+    let account = config.active_account();
+    if AuthCredentials::delete(&account.identifier)? {
+        println!("Saved App Password deleted for {}.", account.identifier);
     } else {
-        println!("No saved App Password was found for {}.", config.identifier);
+        println!(
+            "No saved App Password was found for {}.",
+            account.identifier
+        );
     }
     Ok(())
 }
