@@ -1,4 +1,4 @@
-use std::{convert::TryInto, num::NonZeroU64};
+use std::{convert::TryInto, future::Future, num::NonZeroU64, pin::Pin};
 
 use eyre::{bail, Result};
 use unicode_segmentation::UnicodeSegmentation;
@@ -240,6 +240,24 @@ pub async fn selected_feed_timeline(
                 cursor: output.cursor.clone(),
             })
         }
+    }
+}
+
+pub trait TimelineClient: Send + Sync {
+    fn load_timeline<'a>(
+        &'a self,
+        descriptor: &'a FeedDescriptor,
+        cursor: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<TimelinePage>> + Send + 'a>>;
+}
+
+impl TimelineClient for BskyAgent {
+    fn load_timeline<'a>(
+        &'a self,
+        descriptor: &'a FeedDescriptor,
+        cursor: Option<String>,
+    ) -> Pin<Box<dyn Future<Output = Result<TimelinePage>> + Send + 'a>> {
+        Box::pin(selected_feed_timeline(self, descriptor, cursor))
     }
 }
 
@@ -544,7 +562,7 @@ pub async fn profile_content(
                 ProfileSection::Posts => "posts_no_replies",
                 ProfileSection::Replies => "posts_with_replies",
                 ProfileSection::Media => "posts_with_media",
-                _ => unreachable!(),
+                _ => return Ok(ProfileContent::Items(Vec::new())),
             };
             let output = agent
                 .api
@@ -1021,6 +1039,12 @@ pub fn post_facets(post: &defs::PostViewData) -> Vec<PostFacet> {
         return Vec::new();
     };
     facets_from_record(&record)
+}
+
+pub fn post_text(post: &defs::PostViewData) -> Option<String> {
+    post::Record::try_from_unknown(post.record.clone())
+        .ok()
+        .map(|record| record.text.clone())
 }
 
 pub fn feed_context_lines(feed: &defs::FeedViewPostData) -> Vec<String> {
@@ -1624,8 +1648,9 @@ pub async fn likes(agent: &BskyAgent, did: String) -> Result<repo::list_records:
         .repo
         .list_records(
             repo::list_records::ParametersData {
-                collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
-                repo: AtIdentifier::Did(Did::new(did).unwrap()),
+                collection: Nsid::new("app.bsky.feed.like".to_string())
+                    .map_err(eyre::Report::msg)?,
+                repo: AtIdentifier::Did(Did::new(did).map_err(eyre::Report::msg)?),
                 cursor: None,
                 limit: None,
                 reverse: None,
@@ -1645,8 +1670,9 @@ pub async fn reposts(agent: &BskyAgent, did: String) -> Result<repo::list_record
         .repo
         .list_records(
             repo::list_records::ParametersData {
-                collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
-                repo: AtIdentifier::Did(Did::new(did).unwrap()),
+                collection: Nsid::new("app.bsky.feed.repost".to_string())
+                    .map_err(eyre::Report::msg)?,
+                repo: AtIdentifier::Did(Did::new(did).map_err(eyre::Report::msg)?),
                 cursor: None,
                 limit: None,
                 reverse: None,
@@ -1701,9 +1727,10 @@ pub async fn unlike(agent: &Agent, did: Did, rkey: String) -> Result<()> {
         .repo
         .delete_record(
             repo::delete_record::InputData {
-                collection: Nsid::new("app.bsky.feed.like".to_string()).unwrap(),
+                collection: Nsid::new("app.bsky.feed.like".to_string())
+                    .map_err(eyre::Report::msg)?,
                 repo: AtIdentifier::Did(did),
-                rkey: RecordKey::new(rkey).unwrap(),
+                rkey: RecordKey::new(rkey).map_err(eyre::Report::msg)?,
                 swap_commit: None,
                 swap_record: None,
             }
@@ -1741,9 +1768,10 @@ pub async fn unrepost(agent: &BskyAgent, did: Did, rkey: String) -> Result<()> {
         .repo
         .delete_record(
             repo::delete_record::InputData {
-                collection: Nsid::new("app.bsky.feed.repost".to_string()).unwrap(),
+                collection: Nsid::new("app.bsky.feed.repost".to_string())
+                    .map_err(eyre::Report::msg)?,
                 repo: AtIdentifier::Did(did),
-                rkey: RecordKey::new(rkey).unwrap(),
+                rkey: RecordKey::new(rkey).map_err(eyre::Report::msg)?,
                 swap_commit: None,
                 swap_record: None,
             }
@@ -1838,6 +1866,33 @@ pub async fn toggle_repost_post_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MockTimelineClient;
+
+    impl TimelineClient for MockTimelineClient {
+        fn load_timeline<'a>(
+            &'a self,
+            _descriptor: &'a FeedDescriptor,
+            cursor: Option<String>,
+        ) -> Pin<Box<dyn Future<Output = Result<TimelinePage>> + Send + 'a>> {
+            Box::pin(async move {
+                Ok(TimelinePage {
+                    feed: Vec::new(),
+                    cursor: cursor.map(|value| format!("next-{value}")),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn timeline_client_is_mockable_without_network_access() {
+        let page = MockTimelineClient
+            .load_timeline(&FeedDescriptor::following(), Some("cursor".into()))
+            .await
+            .expect("mock page");
+        assert!(page.feed.is_empty());
+        assert_eq!(page.cursor.as_deref(), Some("next-cursor"));
+    }
 
     #[test]
     fn facets_use_utf8_byte_ranges_and_build_safe_targets() {

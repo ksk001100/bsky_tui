@@ -23,11 +23,22 @@ impl Events {
         let event_stop_capture = stop_capture.clone();
         tokio::spawn(async move {
             loop {
-                if crossterm::event::poll(tick_rate).unwrap() {
-                    if let crossterm::event::Event::Key(key) = crossterm::event::read().unwrap() {
-                        let key = Key::from(key);
-                        let _ = event_tx.send(InputEvent::Input(key)).await;
-                    }
+                match crossterm::event::poll(tick_rate) {
+                    Ok(true) => match crossterm::event::read() {
+                        Ok(crossterm::event::Event::Key(key)) => {
+                            let _ = event_tx.send(InputEvent::Input(Key::from(key))).await;
+                        }
+                        Ok(crossterm::event::Event::Mouse(mouse)) => {
+                            let _ = event_tx.send(InputEvent::Mouse(mouse)).await;
+                        }
+                        Ok(crossterm::event::Event::Resize(width, height)) => {
+                            let _ = event_tx.send(InputEvent::Resize(width, height)).await;
+                        }
+                        Ok(_) => {}
+                        Err(_) => break,
+                    },
+                    Ok(false) => {}
+                    Err(_) => break,
                 }
                 let _ = event_tx.send(InputEvent::Tick).await;
                 if event_stop_capture.load(Ordering::Relaxed) {

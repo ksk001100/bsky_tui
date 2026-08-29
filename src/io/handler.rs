@@ -13,7 +13,7 @@ use crate::{
         auth::AuthCredentials, config::AppConfig, profile::ProfileSection, profile::ProfileState,
         state::Mode, state::Tab, App,
     },
-    bsky,
+    bsky::{self, TimelineClient},
 };
 
 pub struct IoAsyncHandler {
@@ -76,8 +76,14 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         app.loaded();
         match result {
-            Ok(()) => app.clear_error(),
-            Err(error) => app.set_error(user_error(operation, &error)),
+            Ok(()) => {
+                crate::logging::event(operation, true);
+                app.clear_error()
+            }
+            Err(error) => {
+                crate::logging::event(operation, false);
+                app.set_error(user_error(operation, &error))
+            }
         }
     }
 
@@ -88,6 +94,15 @@ impl IoAsyncHandler {
             .state
             .get_agent()
             .ok_or_else(|| eyre!("client is not initialized"))
+    }
+
+    async fn did(&self) -> Result<atrium_api::types::string::Did> {
+        self.app
+            .lock()
+            .await
+            .state
+            .get_did()
+            .ok_or_else(|| eyre!("account is not initialized"))
     }
 
     async fn do_initialize(&mut self) -> Result<()> {
@@ -159,12 +174,8 @@ impl IoAsyncHandler {
             .get_timeline()
             .unwrap_or_default();
         let old_position = self.app.lock().await.state.get_tl_list_position();
-        let timeline = bsky::selected_feed_timeline(
-            self.agent().await?.as_ref(),
-            &active_feed,
-            cursor.clone(),
-        )
-        .await?;
+        let agent = self.agent().await?;
+        let timeline = agent.load_timeline(&active_feed, cursor.clone()).await?;
         let moderation = self.app.lock().await.state.moderation();
         let image_urls = timeline
             .feed
@@ -378,7 +389,7 @@ impl IoAsyncHandler {
             .get_profile()
             .map(|profile| profile.details)
             .ok_or_else(|| eyre!("no profile is open"))?;
-        if details.did == self.app.lock().await.state.get_did() {
+        if Some(details.did.clone()) == self.app.lock().await.state.get_did() {
             return Err(eyre!("you cannot follow your own account"));
         }
         let agent = self.agent().await?;
@@ -572,7 +583,7 @@ impl IoAsyncHandler {
         {
             bsky::like(
                 agent.as_ref(),
-                self.app.lock().await.state.get_did(),
+                self.did().await?,
                 post.cid.clone(),
                 post.uri.clone(),
             )
@@ -661,7 +672,9 @@ impl IoAsyncHandler {
         let (did, feed) = {
             let app = self.app.lock().await;
             (
-                app.state.get_did(),
+                app.state
+                    .get_did()
+                    .ok_or_else(|| eyre!("account is not initialized"))?,
                 app.state
                     .get_current_feed()
                     .ok_or_else(|| eyre!("no timeline post is selected"))?,
@@ -675,7 +688,9 @@ impl IoAsyncHandler {
         let (did, feed) = {
             let app = self.app.lock().await;
             (
-                app.state.get_did(),
+                app.state
+                    .get_did()
+                    .ok_or_else(|| eyre!("account is not initialized"))?,
                 app.state
                     .get_current_feed()
                     .ok_or_else(|| eyre!("no timeline post is selected"))?,
@@ -737,7 +752,9 @@ impl IoAsyncHandler {
     )> {
         let app = self.app.lock().await;
         Ok((
-            app.state.get_did(),
+            app.state
+                .get_did()
+                .ok_or_else(|| eyre!("account is not initialized"))?,
             app.state
                 .get_current_search_result()
                 .ok_or_else(|| eyre!("no search result is selected"))?,
@@ -781,7 +798,7 @@ impl IoAsyncHandler {
         match event {
             FeatureEvent::Load(section) => self.load_feature_section(section).await,
             FeatureEvent::OpenList(uri) => {
-                let did = self.app.lock().await.state.get_did();
+                let did = self.did().await?;
                 let rows = bsky::feature_services::list_detail(
                     self.agent().await?.as_ref(),
                     uri.clone(),
@@ -962,7 +979,11 @@ impl IoAsyncHandler {
                                         .keybindings
                                         .insert(fields[0].clone(), fields[1].clone());
                                 }
-                                SettingKey::IncomingDm => unreachable!(),
+                                SettingKey::IncomingDm => {
+                                    return Err(eyre!(
+                                        "incoming DM is handled by the chat service"
+                                    ));
+                                }
                             }
                             config.save()?;
                             self.app.lock().await.set_ui_config(config.ui.clone());
@@ -1105,7 +1126,7 @@ impl IoAsyncHandler {
         section: crate::app::feature_panel::FeatureSection,
     ) -> Result<()> {
         use crate::app::feature_panel::{FeatureRow, FeatureSection, FeatureTarget, SettingKey};
-        let did = self.app.lock().await.state.get_did();
+        let did = self.did().await?;
         let rows = match section {
             FeatureSection::Lists => {
                 let agent = self.agent().await?;
@@ -1332,5 +1353,13 @@ mod tests {
             updated,
             vec![None, Some("page-2".into()), Some("fresh".into())]
         );
+    }
+
+    #[test]
+    fn network_and_authentication_failures_are_classified_without_panicking() {
+        let network = user_error("Timeline", &eyre!("connection timeout"));
+        assert!(network.contains("Network request failed"));
+        let auth = user_error("Initialization", &eyre!("401 unauthorized"));
+        assert!(auth.contains("Authentication failed"));
     }
 }

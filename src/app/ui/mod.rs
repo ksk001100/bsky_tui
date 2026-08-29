@@ -172,6 +172,17 @@ where
         f.render_stateful_widget(popup, area, &mut list_state);
     }
 
+    if let Some((items, selected)) = app.current_action_menu() {
+        let area = layout::popup(55, 60, size);
+        let rows = items.into_iter().map(ListItem::new).collect::<Vec<_>>();
+        let widget = List::new(rows)
+            .block(Block::default().borders(Borders::ALL).title(" Actions "))
+            .highlight_style(Style::default().bg(app.accent_color()).fg(Color::White));
+        let mut state = ListState::default().with_selected(Some(selected));
+        f.render_widget(Clear, area);
+        f.render_stateful_widget(widget, area, &mut state);
+    }
+
     if let Some(preview) = app.composer_preview() {
         let popup = draw::link_preview(preview);
         let area = layout::popup(75, 45, size);
@@ -258,37 +269,48 @@ fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let Some(profile) = app.state.get_profile() else {
         return;
     };
+    let compact = area.width < 72 || area.height < 20;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12),
+            Constraint::Length(if compact { 7 } else { 12 }),
             Constraint::Length(3),
             Constraint::Min(1),
         ])
         .split(area);
     let header = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(16),
-            Constraint::Percentage(25),
-            Constraint::Min(24),
-        ])
+        .constraints(if compact {
+            [
+                Constraint::Length(0),
+                Constraint::Length(0),
+                Constraint::Min(1),
+            ]
+        } else {
+            [
+                Constraint::Length(16),
+                Constraint::Percentage(25),
+                Constraint::Min(24),
+            ]
+        })
         .split(chunks[0]);
 
-    render_profile_image(
-        f,
-        app,
-        profile.details.avatar.as_deref(),
-        header[0],
-        "Avatar",
-    );
-    render_profile_image(
-        f,
-        app,
-        profile.details.banner.as_deref(),
-        header[1],
-        "Banner",
-    );
+    if !compact {
+        render_profile_image(
+            f,
+            app,
+            profile.details.avatar.as_deref(),
+            header[0],
+            "Avatar",
+        );
+        render_profile_image(
+            f,
+            app,
+            profile.details.banner.as_deref(),
+            header[1],
+            "Banner",
+        );
+    }
     f.render_widget(draw::profile_header(&profile), header[2]);
     f.render_widget(draw::profile_tabs(&profile), chunks[1]);
 
@@ -342,7 +364,7 @@ fn render_post_images(
     area: ratatui::layout::Rect,
     offset: usize,
 ) {
-    if !app.images_enabled() {
+    if !app.images_enabled() || area.width < 45 {
         return;
     }
     for placement in draw::image_placements(layouts, area, offset) {

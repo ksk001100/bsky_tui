@@ -13,7 +13,9 @@ pub mod ui;
 
 use atrium_api::types::string::{AtIdentifier, Did, Handle};
 use bsky_sdk::BskyAgent;
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::widgets::TableState;
+use std::time::{Duration, Instant};
 use tui_input::{Input, InputRequest};
 
 use self::images::ImageCache;
@@ -53,6 +55,11 @@ struct InteractionViewer {
 
 struct FeedViewer {
     items: Vec<feed::FeedDescriptor>,
+    index: usize,
+}
+
+struct ActionMenu {
+    items: Vec<(&'static str, Key)>,
     index: usize,
 }
 
@@ -107,12 +114,14 @@ pub struct App {
     pending_delete: Option<String>,
     feed_catalog: Vec<feed::FeedDescriptor>,
     feed_viewer: Option<FeedViewer>,
+    action_menu: Option<ActionMenu>,
     composer_preview: Option<bsky::LinkPreview>,
     pub(crate) notification_settings: Option<notifications::NotificationSettings>,
     pub(crate) help_table_state: TableState,
     help_return_mode: state::Mode,
     pub(crate) feature_panel: Option<feature_panel::FeaturePanel>,
     ui_config: config::UiConfig,
+    last_auto_refresh: Instant,
 }
 
 impl App {
@@ -133,12 +142,14 @@ impl App {
             pending_delete: None,
             feed_catalog: Vec::new(),
             feed_viewer: None,
+            action_menu: None,
             composer_preview: None,
             notification_settings: None,
             help_table_state: TableState::default().with_selected(Some(0)),
             help_return_mode: state::Mode::Normal,
             feature_panel: None,
             ui_config: config::UiConfig::default(),
+            last_auto_refresh: Instant::now(),
         }
     }
 
@@ -172,6 +183,9 @@ impl App {
         }
         if self.notification_settings.is_some() {
             return "↑/↓ category   Space list   p push   i audience   v activity   Esc close";
+        }
+        if self.action_menu.is_some() {
+            return "↑/↓ select   Enter run   Esc close";
         }
         if let Some(panel) = self.feature_panel.as_ref() {
             if panel.prompt.is_some() {
@@ -214,7 +228,8 @@ impl App {
                     "↑/↓ select   Enter thread   i image   / search   Tab switch   ? help"
                 }
             },
-            state::Mode::Help | state::Mode::FeedSearch => unreachable!(),
+            state::Mode::Help => "↑/↓ move   PgUp/PgDn jump   Esc close",
+            state::Mode::FeedSearch => "Enter search   Esc cancel",
         }
     }
 
@@ -273,6 +288,9 @@ impl App {
         if self.notification_settings.is_some() {
             return self.notification_settings_action(key).await;
         }
+        if self.action_menu.is_some() {
+            return self.action_menu_action(key).await;
+        }
         if self.feature_panel.is_some() {
             return self.feature_panel_action(key).await;
         }
@@ -291,6 +309,13 @@ impl App {
         }
 
         if self.state.get_mode() == state::Mode::Normal {
+            if self.configured_key("action_menu", key, Key::Char(':')) {
+                self.action_menu = Some(ActionMenu {
+                    items: action_items(self.state.get_tab()),
+                    index: 0,
+                });
+                return AppReturn::Continue;
+            }
             let section = if self.configured_key("open_lists", key, Key::Char('g')) {
                 Some(feature_panel::FeatureSection::Lists)
             } else if self.configured_key("open_dm", key, Key::Char('d')) {
@@ -309,6 +334,15 @@ impl App {
                 return AppReturn::Continue;
             }
         }
+
+        let key = if matches!(
+            self.state.get_mode(),
+            state::Mode::Normal | state::Mode::Thread | state::Mode::Profile
+        ) {
+            self.remap_navigation_key(key)
+        } else {
+            key
+        };
 
         match self.state.get_mode() {
             state::Mode::Normal => match self.state.get_tab() {
@@ -388,6 +422,26 @@ impl App {
             }
             Key::Up | Key::Char('k') | Key::Ctrl('p') => {
                 self.state.move_tl_scroll_up();
+                AppReturn::Continue
+            }
+            Key::PageDown | Key::Ctrl('d') => {
+                self.state.move_tl_half_down();
+                AppReturn::Continue
+            }
+            Key::PageUp | Key::Ctrl('u') => {
+                self.state.move_tl_half_up();
+                AppReturn::Continue
+            }
+            Key::Home => {
+                self.state.move_tl_scroll_top();
+                AppReturn::Continue
+            }
+            Key::End => {
+                self.state.move_tl_scroll_bottom();
+                AppReturn::Continue
+            }
+            Key::Char('y') | Key::Char('Y') | Key::Alt('y') => {
+                self.copy_selected_post(key);
                 AppReturn::Continue
             }
             Key::Char('o') => {
@@ -478,12 +532,12 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('h') | Key::Left | Key::Char('[') | Key::PageUp => {
+            Key::Char('h') | Key::Left | Key::Char('[') => {
                 self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Prev))
                     .await;
                 AppReturn::Continue
             }
-            Key::Char('l') | Key::Right | Key::Char(']') | Key::PageDown => {
+            Key::Char('l') | Key::Right | Key::Char(']') => {
                 self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Next))
                     .await;
                 AppReturn::Continue
@@ -562,12 +616,30 @@ impl App {
                 self.state.move_notifications_scroll_up();
                 AppReturn::Continue
             }
+            Key::PageDown | Key::Ctrl('d') => {
+                self.state.move_notifications_scroll_by(5);
+                AppReturn::Continue
+            }
+            Key::PageUp | Key::Ctrl('u') => {
+                self.state.move_notifications_scroll_by(-5);
+                AppReturn::Continue
+            }
+            Key::Home => {
+                self.state.move_notifications_top();
+                AppReturn::Continue
+            }
+            Key::End => {
+                self.state.move_notifications_bottom();
+                AppReturn::Continue
+            }
             Key::Enter | Key::Char('o') => {
                 let url = self
                     .state
                     .get_current_notification()
                     .and_then(|notification| {
-                        bsky::notification_post_url(&notification, &self.state.get_handle())
+                        self.state
+                            .get_handle()
+                            .and_then(|handle| bsky::notification_post_url(&notification, &handle))
                     });
                 match url {
                     Some(url) => {
@@ -603,12 +675,12 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('h') | Key::Left | Key::Char('[') | Key::PageUp => {
+            Key::Char('h') | Key::Left | Key::Char('[') => {
                 self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Prev))
                     .await;
                 AppReturn::Continue
             }
-            Key::Char('l') | Key::Right | Key::Char(']') | Key::PageDown => {
+            Key::Char('l') | Key::Right | Key::Char(']') => {
                 self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Next))
                     .await;
                 AppReturn::Continue
@@ -705,6 +777,26 @@ impl App {
                 self.state.move_search_scroll_up();
                 AppReturn::Continue
             }
+            Key::PageDown | Key::Ctrl('d') => {
+                self.state.move_search_scroll_by(5);
+                AppReturn::Continue
+            }
+            Key::PageUp | Key::Ctrl('u') => {
+                self.state.move_search_scroll_by(-5);
+                AppReturn::Continue
+            }
+            Key::Home => {
+                self.state.move_search_top();
+                AppReturn::Continue
+            }
+            Key::End => {
+                self.state.move_search_bottom();
+                AppReturn::Continue
+            }
+            Key::Char('y') | Key::Char('Y') | Key::Alt('y') => {
+                self.copy_selected_post(key);
+                AppReturn::Continue
+            }
             Key::Char('o') => {
                 if let Some(feed) = self.state.get_current_search_result() {
                     if let Some(id) = feed.uri.split('/').next_back() {
@@ -779,7 +871,7 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('h') | Key::Left | Key::Char('[') | Key::PageUp => {
+            Key::Char('h') | Key::Left | Key::Char('[') => {
                 match self.state.get_search_query() {
                     Some(_) => {
                         self.dispatch(IoEvent::Search(SearchEvent::Prev)).await;
@@ -792,7 +884,7 @@ impl App {
                 }
                 AppReturn::Continue
             }
-            Key::Char('l') | Key::Right | Key::Char(']') | Key::PageDown => {
+            Key::Char('l') | Key::Right | Key::Char(']') => {
                 match self.state.get_search_query() {
                     Some(_) => {
                         self.dispatch(IoEvent::Search(SearchEvent::Next)).await;
@@ -815,6 +907,11 @@ impl App {
             Key::Char('?') | Key::F1 => self.open_help(),
             Key::Down | Key::Char('j') | Key::Ctrl('n') => self.state.move_profile_down(),
             Key::Up | Key::Char('k') | Key::Ctrl('p') => self.state.move_profile_up(),
+            Key::PageDown | Key::Ctrl('d') => self.state.move_profile_by(5),
+            Key::PageUp | Key::Ctrl('u') => self.state.move_profile_by(-5),
+            Key::Home => self.state.move_profile_top(),
+            Key::End => self.state.move_profile_bottom(),
+            Key::Char('y') | Key::Char('Y') | Key::Alt('y') => self.copy_selected_post(key),
             Key::Left | Key::Char('h') => {
                 if let Some(profile) = self.state.get_profile() {
                     let section = profile.section.previous();
@@ -905,6 +1002,11 @@ impl App {
             Key::Char('?') | Key::F1 => self.open_help(),
             Key::Down | Key::Char('j') | Key::Ctrl('n') => self.state.move_thread_down(),
             Key::Up | Key::Char('k') | Key::Ctrl('p') => self.state.move_thread_up(),
+            Key::PageDown => self.state.move_thread_by(5),
+            Key::PageUp => self.state.move_thread_by(-5),
+            Key::Home => self.state.move_thread_top(),
+            Key::End => self.state.move_thread_bottom(),
+            Key::Char('y') | Key::Char('Y') | Key::Alt('y') => self.copy_selected_post(key),
             Key::Char('o') => {
                 if let Some(post) = self.state.get_current_thread_post() {
                     if let Some(url) = bsky::get_url(post.author.handle.clone(), post.uri.clone()) {
@@ -952,7 +1054,7 @@ impl App {
                     .get_thread()
                     .into_iter()
                     .filter_map(|entry| entry.post().cloned())
-                    .find(|post| post.author.did == did);
+                    .find(|post| Some(post.author.did.clone()) == did);
                 if let (Some(root), Some(reply)) = (root, selected) {
                     if root.uri != reply.uri {
                         self.dispatch(IoEvent::Feature(FeatureEvent::ToggleHiddenReply {
@@ -987,7 +1089,7 @@ impl App {
             Key::Ctrl('d') => {
                 if let Some(quote) = self.state.get_current_thread_post() {
                     if let Some((post, author)) = bsky::quoted_post(&quote) {
-                        if author == self.state.get_did() {
+                        if Some(author) == self.state.get_did() {
                             self.dispatch(IoEvent::Feature(FeatureEvent::DetachQuote {
                                 post,
                                 quote: quote.uri,
@@ -1104,7 +1206,7 @@ impl App {
     }
 
     fn request_delete(&mut self, post: &atrium_api::app::bsky::feed::defs::PostViewData) {
-        if post.author.did != self.state.get_did() {
+        if Some(post.author.did.clone()) != self.state.get_did() {
             self.set_error("Only your own posts can be deleted".to_owned());
             return;
         }
@@ -2021,6 +2123,140 @@ impl App {
         Some((viewer.items.clone(), viewer.index))
     }
 
+    pub fn current_action_menu(&self) -> Option<(Vec<&'static str>, usize)> {
+        let menu = self.action_menu.as_ref()?;
+        Some((
+            menu.items.iter().map(|(label, _)| *label).collect(),
+            menu.index,
+        ))
+    }
+
+    async fn action_menu_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => self.action_menu = None,
+            Key::Up | Key::Char('k') => {
+                if let Some(menu) = self.action_menu.as_mut() {
+                    menu.index = menu.index.saturating_sub(1);
+                }
+            }
+            Key::Down | Key::Char('j') => {
+                if let Some(menu) = self.action_menu.as_mut() {
+                    menu.index = (menu.index + 1).min(menu.items.len().saturating_sub(1));
+                }
+            }
+            Key::Home => {
+                if let Some(menu) = self.action_menu.as_mut() {
+                    menu.index = 0;
+                }
+            }
+            Key::End => {
+                if let Some(menu) = self.action_menu.as_mut() {
+                    menu.index = menu.items.len().saturating_sub(1);
+                }
+            }
+            Key::Enter => {
+                let selected = self
+                    .action_menu
+                    .take()
+                    .and_then(|menu| menu.items.get(menu.index).map(|(_, key)| *key));
+                if let Some(key) = selected {
+                    return match self.state.get_tab() {
+                        Tab::Home => self.timeline_action(key).await,
+                        Tab::Notifications => self.notifications_action(key).await,
+                        Tab::Search => self.search_action(key).await,
+                    };
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    pub async fn do_mouse_action(&mut self, mouse: MouseEvent) -> AppReturn {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => self.move_current_selection(-3),
+            MouseEventKind::ScrollDown => self.move_current_selection(3),
+            MouseEventKind::Down(MouseButton::Left) if mouse.row <= 6 => {
+                let width = crossterm::terminal::size().map_or(1, |size| size.0.max(1));
+                let tab = match mouse.column.saturating_mul(3) / width {
+                    0 => Tab::Home,
+                    1 => Tab::Notifications,
+                    _ => Tab::Search,
+                };
+                if self.state.get_mode() == state::Mode::Normal {
+                    self.state.set_tab(tab);
+                    match tab {
+                        Tab::Home if self.state.get_timeline().is_none() => {
+                            self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Load))
+                                .await
+                        }
+                        Tab::Notifications => {
+                            self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
+                                .await
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    fn move_current_selection(&mut self, delta: isize) {
+        match self.state.get_mode() {
+            state::Mode::Thread => self.state.move_thread_by(delta),
+            state::Mode::Profile => self.state.move_profile_by(delta),
+            state::Mode::Normal => match self.state.get_tab() {
+                Tab::Home => self.state.move_tl_scroll_by(delta),
+                Tab::Notifications => self.state.move_notifications_scroll_by(delta),
+                Tab::Search => self.state.move_search_scroll_by(delta),
+            },
+            _ => {}
+        }
+    }
+
+    fn selected_post(&self) -> Option<atrium_api::app::bsky::feed::defs::PostViewData> {
+        match self.state.get_mode() {
+            state::Mode::Thread => self.state.get_current_thread_post(),
+            state::Mode::Profile => self
+                .state
+                .get_current_profile_post()
+                .map(|feed| feed.post.data.clone()),
+            _ => match self.state.get_tab() {
+                Tab::Home => self
+                    .state
+                    .get_current_feed()
+                    .map(|feed| feed.post.data.clone()),
+                Tab::Search => self.state.get_current_search_result(),
+                Tab::Notifications => None,
+            },
+        }
+    }
+
+    fn copy_selected_post(&mut self, key: Key) {
+        let Some(post) = self.selected_post() else {
+            self.set_error("No post is selected".into());
+            return;
+        };
+        let (label, value) = match key {
+            Key::Char('y') => ("post text", bsky::post_text(&post).unwrap_or_default()),
+            Key::Char('Y') => (
+                "post URL",
+                bsky::get_url(post.author.handle.clone(), post.uri.clone()).unwrap_or(post.uri),
+            ),
+            _ => (
+                "AT URI and DID",
+                format!("{}\n{}", post.uri, post.author.did.as_str()),
+            ),
+        };
+        if value.is_empty() {
+            self.set_error(format!("Selected {label} is empty"));
+        } else if let Err(error) = copy_osc52(&value) {
+            self.set_error(format!("Could not copy {label}: {error}"));
+        }
+    }
+
     async fn preview_composer_link(&mut self) {
         match composer::parse_drafts(self.state.get_input().value())
             .ok()
@@ -2079,6 +2315,18 @@ impl App {
 
     pub async fn update_on_tick(&mut self) -> AppReturn {
         self.images.poll();
+        let interval = self.ui_config.auto_refresh_seconds;
+        if interval > 0
+            && !self.is_loading
+            && self.error.is_none()
+            && self.state.get_mode() == state::Mode::Normal
+            && self.state.get_tab() == Tab::Home
+            && self.last_auto_refresh.elapsed() >= Duration::from_secs(interval)
+        {
+            self.last_auto_refresh = Instant::now();
+            self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                .await;
+        }
         AppReturn::Continue
     }
 
@@ -2113,6 +2361,9 @@ impl App {
             return;
         }
         self.is_loading = true;
+        if matches!(action, IoEvent::LoadTimeline(_)) {
+            self.last_auto_refresh = Instant::now();
+        }
         if self.io_tx.send(action).await.is_err() {
             self.is_loading = false;
             self.error = Some("Internal error: background worker is unavailable".to_string());
@@ -2200,6 +2451,32 @@ impl App {
             .unwrap_or(key == default)
     }
 
+    fn remap_navigation_key(&self, key: Key) -> Key {
+        const ACTIONS: &[(&str, Key)] = &[
+            ("move_up", Key::Up),
+            ("move_down", Key::Down),
+            ("half_page_up", Key::PageUp),
+            ("half_page_down", Key::PageDown),
+            ("first_item", Key::Home),
+            ("last_item", Key::End),
+            ("reload", Key::F5),
+            ("open", Key::Enter),
+            ("copy_text", Key::Char('y')),
+            ("copy_url", Key::Char('Y')),
+            ("copy_ids", Key::Alt('y')),
+        ];
+        ACTIONS
+            .iter()
+            .find_map(|(action, canonical)| {
+                self.ui_config
+                    .keybindings
+                    .get(*action)
+                    .filter(|binding| binding_matches(binding, key))
+                    .map(|_| *canonical)
+            })
+            .unwrap_or(key)
+    }
+
     pub fn loaded(&mut self) {
         self.is_loading = false;
     }
@@ -2211,6 +2488,53 @@ fn interaction_kind(key: Key) -> InteractionKind {
         Key::Char('R') => InteractionKind::Reposts,
         _ => InteractionKind::Quotes,
     }
+}
+
+fn action_items(tab: Tab) -> Vec<(&'static str, Key)> {
+    let mut items = vec![
+        ("Reload", Key::F5),
+        ("Open selected item", Key::Enter),
+        ("Copy post text", Key::Char('y')),
+        ("Copy post URL", Key::Char('Y')),
+        ("Copy AT URI and DID", Key::Alt('y')),
+        ("First item", Key::Home),
+        ("Last item", Key::End),
+    ];
+    if tab == Tab::Home {
+        items.extend([("New post", Key::Char('n')), ("Reply", Key::Char('r'))]);
+    }
+    items
+}
+
+fn copy_osc52(value: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let encoded = base64_encode(value.as_bytes());
+    let mut stdout = std::io::stdout();
+    write!(stdout, "\x1b]52;c;{encoded}\x07")?;
+    stdout.flush()
+}
+
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let bits = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        output.push(TABLE[((bits >> 18) & 63) as usize] as char);
+        output.push(TABLE[((bits >> 12) & 63) as usize] as char);
+        output.push(if chunk.len() > 1 {
+            TABLE[((bits >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            TABLE[(bits & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    output
 }
 
 fn actor_moderation_action(
@@ -2243,7 +2567,12 @@ fn binding_matches(binding: &str, key: Key) -> bool {
         Key::Down => binding == "down",
         Key::Left => binding == "left",
         Key::Right => binding == "right",
+        Key::Home => binding == "home",
+        Key::End => binding == "end",
+        Key::PageUp => binding == "pageup" || binding == "page_up",
+        Key::PageDown => binding == "pagedown" || binding == "page_down",
         Key::F1 => binding == "f1",
+        Key::F5 => binding == "f5",
         _ => false,
     }
 }
@@ -2315,5 +2644,11 @@ mod tests {
 
         app.help_action(Key::Home).await;
         assert_eq!(app.help_table_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn osc52_base64_supports_unicode_clipboard_content() {
+        assert_eq!(base64_encode("日本".as_bytes()), "5pel5pys");
+        assert!(binding_matches("page_down", Key::PageDown));
     }
 }

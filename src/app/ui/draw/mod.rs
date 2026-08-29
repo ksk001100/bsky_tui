@@ -10,7 +10,6 @@ use ratatui::{
     },
 };
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthChar;
 
 use crate::io::InteractionKind;
 use crate::{
@@ -737,10 +736,14 @@ fn render_post(
         }
     }
 
-    let attachment_urls = bsky::post_attachment_urls(post, moderation)
-        .into_iter()
-        .take(4)
-        .collect::<Vec<_>>();
+    let attachment_urls = if inner_width < 41 {
+        Vec::new()
+    } else {
+        bsky::post_attachment_urls(post, moderation)
+            .into_iter()
+            .take(4)
+            .collect::<Vec<_>>()
+    };
     let media_row = if attachment_urls.is_empty() {
         None
     } else {
@@ -893,19 +896,22 @@ fn media_grid(area: Rect, count: usize) -> Vec<Rect> {
 }
 
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+
     let width = width.max(1);
     let mut output = Vec::new();
     for source_line in text.split('\n') {
         let mut line = String::new();
         let mut line_width = 0;
-        for character in source_line.chars() {
-            let character_width = character.width().unwrap_or(0);
-            if line_width > 0 && line_width + character_width > width {
+        for grapheme in source_line.graphemes(true) {
+            let grapheme_width = grapheme.width();
+            if line_width > 0 && line_width + grapheme_width > width {
                 output.push(std::mem::take(&mut line));
                 line_width = 0;
             }
-            line.push(character);
-            line_width += character_width;
+            line.push_str(grapheme);
+            line_width += grapheme_width;
         }
         output.push(line);
     }
@@ -918,7 +924,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 pub fn notifications<'a>(state: &AppState) -> List<'a> {
     let notifications = state.notification_groups();
     let my_handle = state.get_handle();
-    let size = crossterm::terminal::size().unwrap();
+    let size = crossterm::terminal::size().unwrap_or((80, 24));
     let border = "=".repeat(size.0.saturating_sub(4) as usize);
 
     let list_items: Vec<ListItem> = if notifications.is_empty() {
@@ -977,14 +983,20 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     "repost" => {
                         if let Ok(r) = repost::Record::try_from_unknown(notification.record.clone())
                         {
-                            bsky::get_url(my_handle.clone(), r.subject.uri.clone())
+                            my_handle
+                                .clone()
+                                .and_then(|handle| bsky::get_url(handle, r.subject.uri.clone()))
                         } else {
                             None
                         }
                     }
                     "like" => like::Record::try_from_unknown(notification.record.clone())
                         .ok()
-                        .and_then(|r| bsky::get_url(my_handle.clone(), r.subject.uri.clone())),
+                        .and_then(|r| {
+                            my_handle
+                                .clone()
+                                .and_then(|handle| bsky::get_url(handle, r.subject.uri.clone()))
+                        }),
                     _ => None,
                 };
 
@@ -1186,13 +1198,9 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         }
     }
 
-    let current_feed = state.get_current_feed();
-
-    if current_feed.is_none() {
-        return Paragraph::new("Error...");
-    }
-
-    let current_feed = current_feed.unwrap();
+    let Some(current_feed) = state.get_current_feed() else {
+        return Paragraph::new("Select a post before replying");
+    };
     let display_name = current_feed
         .post
         .author
@@ -1267,6 +1275,14 @@ mod tests {
     fn wraps_wide_characters_by_terminal_width() {
         assert_eq!(wrap_text("あいう", 4), vec!["あい", "う"]);
         assert_eq!(wrap_text("abcd", 2), vec!["ab", "cd"]);
+    }
+
+    #[test]
+    fn wrapping_preserves_emoji_combining_marks_and_rtl_order() {
+        assert_eq!(wrap_text("e\u{301}x", 1), vec!["e\u{301}", "x"]);
+        assert_eq!(wrap_text("👩‍💻a", 2), vec!["👩‍💻", "a"]);
+        assert_eq!(wrap_text("שלום", 4).concat(), "שלום");
+        assert_eq!(wrap_text("日本語", 4), vec!["日本", "語"]);
     }
 
     #[test]

@@ -17,6 +17,10 @@ use crate::app::notifications::{self, NotificationFilters, NotificationGroup};
 use crate::app::profile::{ProfileContent, ProfileSection, ProfileState};
 use crate::app::thread::ThreadEntry;
 
+const MAX_CURSOR_HISTORY: usize = 20;
+const HALF_PAGE_ITEMS: usize = 5;
+const MAX_FEED_SNAPSHOTS: usize = 8;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Normal,
@@ -150,11 +154,11 @@ impl AppState {
         matches!(self, &Self::Initialized { .. })
     }
 
-    pub fn get_handle(&self) -> Handle {
+    pub fn get_handle(&self) -> Option<Handle> {
         if let Self::Initialized { handle, .. } = self {
-            handle.clone()
+            Some(handle.clone())
         } else {
-            Handle::new("".to_string()).unwrap()
+            None
         }
     }
 
@@ -260,6 +264,30 @@ impl AppState {
         }
     }
 
+    pub fn move_thread_by(&mut self, delta: isize) {
+        if let Self::Initialized {
+            thread,
+            thread_list_position,
+            thread_list_state,
+            ..
+        } = self
+        {
+            select_by(
+                thread_list_position,
+                thread_list_state,
+                thread.as_ref().map_or(0, Vec::len),
+                delta,
+            );
+        }
+    }
+
+    pub fn move_thread_top(&mut self) {
+        self.move_thread_by(isize::MIN);
+    }
+    pub fn move_thread_bottom(&mut self) {
+        self.move_thread_by(isize::MAX);
+    }
+
     pub fn close_thread(&mut self) {
         if let Self::Initialized { mode, thread, .. } = self {
             *mode = Mode::Normal;
@@ -345,6 +373,28 @@ impl AppState {
         }
     }
 
+    pub fn move_profile_by(&mut self, delta: isize) {
+        if let Self::Initialized {
+            profile: Some(profile),
+            ..
+        } = self
+        {
+            select_by(
+                &mut profile.position,
+                &mut profile.list_state,
+                profile.content.len(),
+                delta,
+            );
+        }
+    }
+
+    pub fn move_profile_top(&mut self) {
+        self.move_profile_by(isize::MIN);
+    }
+    pub fn move_profile_bottom(&mut self) {
+        self.move_profile_by(isize::MAX);
+    }
+
     pub fn get_current_profile_post(&self) -> Option<FeedViewPost> {
         let profile = self.get_profile()?;
         match profile.content {
@@ -361,11 +411,11 @@ impl AppState {
         }
     }
 
-    pub fn get_did(&self) -> Did {
+    pub fn get_did(&self) -> Option<Did> {
         if let Self::Initialized { did, .. } = self {
-            did.clone()
+            Some(did.clone())
         } else {
-            Did::new("".to_string()).unwrap()
+            None
         }
     }
 
@@ -460,6 +510,33 @@ impl AppState {
         }
     }
 
+    pub fn move_tl_scroll_by(&mut self, delta: isize) {
+        if let Self::Initialized {
+            tl_list_position,
+            tl_list_state,
+            timeline,
+            ..
+        } = self
+        {
+            select_by(
+                tl_list_position,
+                tl_list_state,
+                timeline.as_ref().map_or(0, Vec::len),
+                delta,
+            );
+        }
+    }
+
+    pub fn move_tl_half_up(&mut self) {
+        self.move_tl_scroll_by(-(HALF_PAGE_ITEMS as isize));
+    }
+    pub fn move_tl_half_down(&mut self) {
+        self.move_tl_scroll_by(HALF_PAGE_ITEMS as isize);
+    }
+    pub fn move_tl_scroll_bottom(&mut self) {
+        self.move_tl_scroll_by(isize::MAX);
+    }
+
     pub fn get_tl_list_position(&self) -> usize {
         if let Self::Initialized {
             tl_list_position, ..
@@ -502,6 +579,34 @@ impl AppState {
         }
     }
 
+    pub fn move_notifications_scroll_by(&mut self, delta: isize) {
+        if let Self::Initialized {
+            notifications_list_position,
+            notifications_list_state,
+            notifications,
+            notification_filters,
+            ..
+        } = self
+        {
+            let len = notifications.as_ref().map_or(0, |items| {
+                notifications::groups(items, *notification_filters).len()
+            });
+            select_by(
+                notifications_list_position,
+                notifications_list_state,
+                len,
+                delta,
+            );
+        }
+    }
+
+    pub fn move_notifications_top(&mut self) {
+        self.move_notifications_scroll_by(isize::MIN);
+    }
+    pub fn move_notifications_bottom(&mut self) {
+        self.move_notifications_scroll_by(isize::MAX);
+    }
+
     pub fn get_notifications_list_position(&self) -> usize {
         if let Self::Initialized {
             notifications_list_position,
@@ -541,6 +646,30 @@ impl AppState {
                 search_list_state.select(Some(*search_list_position));
             }
         }
+    }
+
+    pub fn move_search_scroll_by(&mut self, delta: isize) {
+        if let Self::Initialized {
+            search_list_position,
+            search_list_state,
+            search_results,
+            ..
+        } = self
+        {
+            select_by(
+                search_list_position,
+                search_list_state,
+                search_results.as_ref().map_or(0, Vec::len),
+                delta,
+            );
+        }
+    }
+
+    pub fn move_search_top(&mut self) {
+        self.move_search_scroll_by(isize::MIN);
+    }
+    pub fn move_search_bottom(&mut self) {
+        self.move_search_scroll_by(isize::MAX);
     }
 
     pub fn get_search_list_position(&self) -> usize {
@@ -621,6 +750,15 @@ impl AppState {
                         .map_or(0, |snapshot| snapshot.new_count),
                 },
             );
+            while feed_snapshots.len() > MAX_FEED_SNAPSHOTS {
+                let removable = feed_snapshots
+                    .keys()
+                    .filter(|id| *id != &active_feed.id && *id != &descriptor.id)
+                    .min()
+                    .cloned();
+                let Some(removable) = removable else { break };
+                feed_snapshots.remove(&removable);
+            }
             let snapshot = feed_snapshots
                 .get(&descriptor.id)
                 .cloned()
@@ -1017,7 +1155,8 @@ impl AppState {
         }
     }
 
-    pub fn set_notification_cursors(&mut self, value: Vec<Option<String>>) {
+    pub fn set_notification_cursors(&mut self, mut value: Vec<Option<String>>) {
+        value.truncate(MAX_CURSOR_HISTORY);
         if let Self::Initialized {
             notification_cursors,
             ..
@@ -1057,7 +1196,8 @@ impl AppState {
         }
     }
 
-    pub fn set_cursors(&mut self, cursors: Vec<Option<String>>) {
+    pub fn set_cursors(&mut self, mut cursors: Vec<Option<String>>) {
+        cursors.truncate(MAX_CURSOR_HISTORY);
         if let Self::Initialized { cursors: c, .. } = self {
             *c = cursors;
         }
@@ -1135,7 +1275,8 @@ impl AppState {
         }
     }
 
-    pub fn set_search_cursors(&mut self, cursors: Vec<Option<String>>) {
+    pub fn set_search_cursors(&mut self, mut cursors: Vec<Option<String>>) {
+        cursors.truncate(MAX_CURSOR_HISTORY);
         if let Self::Initialized {
             search_cursors: c, ..
         } = self
@@ -1208,4 +1349,22 @@ impl AppState {
             *search_query = query;
         }
     }
+}
+
+fn select_by(position: &mut usize, state: &mut ListState, len: usize, delta: isize) {
+    if len == 0 {
+        *position = 0;
+        state.select(None);
+        return;
+    }
+    *position = if delta == isize::MIN {
+        0
+    } else if delta == isize::MAX {
+        len - 1
+    } else if delta < 0 {
+        position.saturating_sub(delta.unsigned_abs())
+    } else {
+        position.saturating_add(delta as usize).min(len - 1)
+    };
+    state.select(Some(*position));
 }

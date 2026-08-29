@@ -7,38 +7,35 @@ on:
 
 jobs:
   build:
-    name: Rust ${{ matrix.os }} ${{ matrix.rust }}
+    name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: Swatinem/rust-cache@v2
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: ${{ matrix.rust }}
-        override: true
-    - name: Build
-      run: cargo build
-    - name: Install
-      run: cargo install --path .
+    - uses: dtolnay/rust-toolchain@stable
     - name: Run tests
       run: cargo test
-      continue-on-error: ${{ matrix.rust == 'nightly' }}
 
   rustfmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - name: Install Rust
         run: rustup update stable && rustup default stable && rustup component add rustfmt
       - run: cargo fmt -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --all-targets -- -D warnings

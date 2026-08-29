@@ -5,7 +5,7 @@ use ratatui_image::{picker::Picker, protocol::StatefulProtocol, FontSize};
 use tokio::sync::mpsc;
 
 const MAX_IMAGE_BYTES: usize = 12 * 1024 * 1024;
-const MAX_CACHED_IMAGES: usize = 512;
+const MAX_CACHED_IMAGES: usize = 64;
 
 enum ImageEntry {
     Loading,

@@ -747,14 +747,18 @@ pub async fn moderation_preferences_rows(agent: &BskyAgent) -> Result<Vec<Featur
                     unread: false,
                 }))
             }
-            PreferencesItem::ContentLabelPref(pref) => rows.push(FeatureRow {
-                title: format!("Label · {}", pref.label),
-                detail: format!("visibility: {}", pref.visibility),
-                target: FeatureTarget::Labeler(
-                    pref.labeler_did.clone().unwrap_or_else(default_labeler),
-                ),
-                unread: false,
-            }),
+            PreferencesItem::ContentLabelPref(pref) => {
+                let labeler = match pref.labeler_did.clone() {
+                    Some(did) => did,
+                    None => default_labeler()?,
+                };
+                rows.push(FeatureRow {
+                    title: format!("Label · {}", pref.label),
+                    detail: format!("visibility: {}", pref.visibility),
+                    target: FeatureTarget::Labeler(labeler),
+                    unread: false,
+                })
+            }
             PreferencesItem::LabelersPref(pref) => {
                 rows.extend(pref.labelers.iter().map(|labeler| FeatureRow {
                     title: format!("Labeler · {}", labeler.did.as_str()),
@@ -1036,8 +1040,8 @@ async fn update_preferences(
     Ok(())
 }
 
-fn default_labeler() -> Did {
-    Did::new("did:plc:ar7c4by46qjdydhdevvrndac".to_owned()).expect("static DID is valid")
+fn default_labeler() -> Result<Did> {
+    Did::new("did:plc:ar7c4by46qjdydhdevvrndac".to_owned()).map_err(eyre::Report::msg)
 }
 
 fn configured_datetime(value: &str) -> String {

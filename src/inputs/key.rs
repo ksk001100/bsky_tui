@@ -78,9 +78,7 @@ impl Key {
     ///
     /// 1 -> F1, etc...
     ///
-    /// # Panics
-    ///
-    /// If `n == 0 || n > 12`
+    /// Unknown function-key numbers are represented as [`Key::Unknown`].
     pub fn from_f(n: u8) -> Key {
         match n {
             0 => Key::F0,
@@ -96,7 +94,7 @@ impl Key {
             10 => Key::F10,
             11 => Key::F11,
             12 => Key::F12,
-            _ => panic!("unknown function key: F{}", n),
+            _ => Key::Unknown,
         }
     }
 }
@@ -216,5 +214,15 @@ impl From<event::KeyEvent> for Key {
 
             _ => Key::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_function_keys_do_not_panic() {
+        assert_eq!(Key::from_f(13), Key::Unknown);
     }
 }

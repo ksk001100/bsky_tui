@@ -24,6 +24,8 @@ pub struct UiConfig {
     pub accent_color: String,
     #[serde(default)]
     pub keybindings: HashMap<String, String>,
+    #[serde(default = "default_auto_refresh_seconds")]
+    pub auto_refresh_seconds: u64,
 }
 
 impl Default for UiConfig {
@@ -34,6 +36,7 @@ impl Default for UiConfig {
             language: default_language(),
             accent_color: default_accent_color(),
             keybindings: HashMap::new(),
+            auto_refresh_seconds: default_auto_refresh_seconds(),
         }
     }
 }
@@ -100,6 +103,16 @@ impl AppConfig {
         }
         if self.active_account().service_url.trim().is_empty() {
             eyre::bail!("service_url is required");
+        }
+        let mut bindings = std::collections::HashSet::new();
+        for (action, binding) in &self.ui.keybindings {
+            let normalized = binding.trim().to_ascii_lowercase();
+            if normalized.is_empty() {
+                eyre::bail!("keybinding for {action} is empty");
+            }
+            if !bindings.insert(normalized.clone()) {
+                eyre::bail!("keybinding collision: {normalized} is assigned more than once");
+            }
         }
         Ok(())
     }
@@ -172,13 +185,15 @@ impl AppConfig {
     }
 
     pub fn config_path() -> std::path::PathBuf {
-        let config_dir = dirs::config_dir().unwrap();
+        let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
         config_dir.join("bsky_tui/config.toml")
     }
 
     pub fn generate_config_file() -> Result<()> {
         let path = Self::config_path();
-        let prefix = path.parent().unwrap();
+        let prefix = path
+            .parent()
+            .ok_or_else(|| eyre::eyre!("invalid config path"))?;
         std::fs::create_dir_all(prefix)?;
 
         let content = format!(
@@ -240,6 +255,10 @@ fn default_accent_color() -> String {
     "blue".to_owned()
 }
 
+fn default_auto_refresh_seconds() -> u64 {
+    60
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +281,13 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(config.active_account().service_url, "https://pds.example");
+    }
+
+    #[test]
+    fn duplicate_configured_keybindings_are_rejected() {
+        let mut config = AppConfig::new("alice.test".into(), false, None);
+        config.ui.keybindings.insert("one".into(), "Ctrl+K".into());
+        config.ui.keybindings.insert("two".into(), "ctrl+k".into());
+        assert!(config.check_required_fields().is_err());
     }
 }

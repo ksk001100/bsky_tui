@@ -76,8 +76,11 @@ show_images = true
 date_format = "%Y-%m-%d %H:%M"
 language = "auto"                 # Used for posts without an explicit !lang directive
 accent_color = "blue"
+auto_refresh_seconds = 60       # 0 disables background refresh
 
 [ui.keybindings]
+# action_menu = "ctrl+p"
+# move_down = "ctrl+j"
 open_lists = "g"
 open_dm = "d"
 open_moderation = ";"
@@ -156,14 +159,20 @@ text-cell rendering mode.
 - `d`: Open Direct Messages
 - `;`: Open Moderation & Safety
 - `,`: Open Settings & Accounts
+- `:`: Open the action menu
+- Mouse wheel: Move the current selection
+- Left click on the tab bar: Switch tabs
+- `PageUp`, `PageDown`: Move half a page within the current list
+- `Home`, `End`: Move to the first or last item
+- `y`, `Y`, `Alt+y`: Copy post text, web URL, or AT URI + author DID using OSC 52
 
 ### Home Tab
 - `j`, `Down`, `Ctrl+n`: Scroll down
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
-- `[`, `PageUp`: Previous page
-- `]`, `PageDown`: Next page
+- `[`: Previous API page
+- `]`: Next API page
 - `F5`: Reload timeline
 - `c`: Open the feed selector
 - `n`: New post
@@ -191,8 +200,8 @@ text-cell rendering mode.
 - `a`: Open the selected sender's profile
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
-- `[`, `PageUp`: Previous page
-- `]`, `PageDown`: Next page
+- `[`: Previous API page
+- `]`: Next API page
 - `/`: Switch to search mode
 
 ### Search Tab
@@ -200,8 +209,8 @@ text-cell rendering mode.
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
-- `[`, `PageUp`: Previous page
-- `]`, `PageDown`: Next page
+- `[`: Previous API page
+- `]`: Next API page
 - `F5`: Reload search results
 - `r`: Reply to selected post
 - `Ctrl+l`: Like/unlike
@@ -301,6 +310,18 @@ Post body
 ---
 Second post in the same thread
 ```
+
+## Protocol and SDK compatibility
+
+This release is built against `atrium-api 0.25.8`, `atrium-xrpc 0.12`,
+`atrium-xrpc-client 0.5`, and `bsky-sdk 0.1.24`. The implemented endpoints use
+the `app.bsky.*`, `chat.bsky.*`, and `com.atproto.*` lexicons shipped by those
+versions. Dependency updates are checked by CI via the committed `Cargo.lock`;
+update the versions here whenever the SDK or generated lexicons change.
+
+Operational logs contain only an operation name, timestamp, and success/error
+status. Credentials, identifiers, post text, and direct-message bodies are not
+passed to the logger. Logs are stored in the platform-local data directory.
 
 - Up to four images and 1 MB per image are accepted; dimensions are used for the aspect ratio.
 - `!replies` accepts `everyone`, `none`, or a comma-separated combination of `followers`, `following`, and `mentioned`.
