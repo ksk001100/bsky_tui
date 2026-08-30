@@ -665,6 +665,7 @@ impl App {
         self.pending_commands.push(Command::Io {
             event: action,
             context: Box::new(context),
+            enqueued_at: Instant::now(),
         });
     }
 

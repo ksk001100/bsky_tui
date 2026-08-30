@@ -1,6 +1,7 @@
 //! Side effects emitted by the application update layer.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use atrium_api::{
     app::bsky::feed::defs::{FeedViewPost, PostViewData},
@@ -291,6 +292,8 @@ pub enum Command {
     Io {
         event: IoEvent,
         context: Box<EffectContext>,
+        /// Used by the serial runtime to expose head-of-line blocking.
+        enqueued_at: Instant,
     },
     LoadImages(Vec<String>),
     PollImages,
@@ -318,6 +321,7 @@ mod tests {
         let [Command::Io {
             event: IoEvent::Initialize,
             context,
+            ..
         }] = update.commands.as_slice()
         else {
             panic!("initialization should emit exactly one I/O command");

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use atrium_api::{app::bsky::feed::post::ReplyRefData, com::atproto::repo::strong_ref};
 use bsky_sdk::BskyAgent;
@@ -19,6 +19,7 @@ pub struct IoAsyncHandler {
     effect_tx: tokio::sync::mpsc::Sender<EffectEnvelope>,
     context: Option<EffectContext>,
     context_event: Option<IoEvent>,
+    acknowledgement_wait: Duration,
 }
 
 pub struct EffectEnvelope {
@@ -33,10 +34,18 @@ impl IoAsyncHandler {
             effect_tx,
             context: None,
             context_event: None,
+            acknowledgement_wait: Duration::ZERO,
         }
     }
 
-    pub async fn handle_io_event(&mut self, io_event: IoEvent, context: EffectContext) {
+    pub async fn handle_io_event(
+        &mut self,
+        io_event: IoEvent,
+        context: EffectContext,
+        queue_wait: Duration,
+    ) {
+        let started_at = std::time::Instant::now();
+        self.acknowledgement_wait = Duration::ZERO;
         self.context = Some(context);
         self.context_event = Some(io_event.clone());
         let operation = operation_name(&io_event);
@@ -86,17 +95,19 @@ impl IoAsyncHandler {
             IoEvent::Feature(event) => self.handle_feature_event(event).await,
         };
 
+        let succeeded = result.is_ok();
         let error = match result {
-            Ok(()) => {
-                crate::logging::event(operation, true);
-                None
-            }
-            Err(error) => {
-                crate::logging::event(operation, false);
-                Some(user_error(operation, &error))
-            }
+            Ok(()) => None,
+            Err(error) => Some(user_error(operation, &error)),
         };
         self.emit_final(EffectMessage::Finished { error }).await;
+        crate::logging::effect_event(
+            operation,
+            succeeded,
+            queue_wait,
+            started_at.elapsed(),
+            self.acknowledgement_wait,
+        );
     }
 
     async fn emit(&mut self, message: EffectMessage) {
@@ -123,7 +134,10 @@ impl IoAsyncHandler {
             .await
             .is_ok()
         {
-            if let Ok(Some(context)) = acknowledgement.await {
+            let acknowledgement_started_at = std::time::Instant::now();
+            let acknowledgement = acknowledgement.await;
+            self.acknowledgement_wait += acknowledgement_started_at.elapsed();
+            if let Ok(Some(context)) = acknowledgement {
                 self.context = Some(context);
             }
         }

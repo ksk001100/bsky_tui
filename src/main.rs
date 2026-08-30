@@ -47,7 +47,15 @@ async fn action(_c: &Context) {
         let mut handler = IoAsyncHandler::new(effect_tx);
         while let Some(command) = command_rx.recv().await {
             match command {
-                AppCommand::Io { event, context } => handler.handle_io_event(event, *context).await,
+                AppCommand::Io {
+                    event,
+                    context,
+                    enqueued_at,
+                } => {
+                    handler
+                        .handle_io_event(event, *context, enqueued_at.elapsed())
+                        .await
+                }
                 AppCommand::LoadImages(_)
                 | AppCommand::PollImages
                 | AppCommand::OpenUrl { .. }
