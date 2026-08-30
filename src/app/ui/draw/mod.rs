@@ -1,6 +1,5 @@
 use atrium_api::app::bsky::feed::{defs::PostViewData, post};
 use atrium_api::types::Unknown;
-use bsky_sdk::api::types::TryFromUnknown;
 use chrono::{DateTime, Utc};
 use ratatui::{
     layout::{Alignment, Constraint, Rect},
@@ -629,14 +628,17 @@ pub fn thread(state: &AppState, width: u16, accent: Color) -> List<'static> {
                         let marker = if target { "●" } else { "├" };
                         let display_name = post.author.display_name.clone().unwrap_or_default();
                         let handle = post.author.handle.as_str();
-                        let text = match &decision {
-                            ModerationDecision::HideContent { reason } => format!("[{reason}]"),
-                            _ => post::Record::try_from_unknown(post.record.clone())
-                                .map(|record| record.text.clone())
-                                .unwrap_or_else(|_| "[Post record unavailable]".to_owned()),
+                        let record = safe_post_record(&post.record);
+                        let text = match (&decision, record.as_ref()) {
+                            (ModerationDecision::HideContent { reason }, _) => {
+                                format!("[{reason}]")
+                            }
+                            (_, Some(record)) => record.text.clone(),
+                            _ => "[Post record unavailable]".to_owned(),
                         };
                         let mut lines = vec![format!(
-                            "{marker} {display_name} @{handle}  ↩ {} 🔁 {} ❤ {}",
+                            "{marker} {display_name} @{handle} · {}  ↩ {} 🔁 {} ❤ {}",
+                            post_datetime(record.as_deref()),
                             post.reply_count.unwrap_or(0),
                             post.repost_count.unwrap_or(0),
                             post.like_count.unwrap_or(0)
@@ -736,14 +738,11 @@ fn render_post(
     };
     let indent = avatar_width + u16::from(avatar_width > 0) * 2;
     let content_width = inner_width.saturating_sub(indent).max(1);
-    let (mut text, created_at) = if let Some(record) = safe_post_record(&post.record) {
-        (record.text.clone(), format!("{:?}+0000", record.created_at))
+    let (mut text, posted_at) = if let Some(record) = safe_post_record(&post.record) {
+        (record.text.clone(), post_datetime(Some(&record)))
     } else {
-        (String::new(), String::new())
+        (String::new(), "time unavailable".to_owned())
     };
-    let duration = DateTime::parse_from_str(&created_at, "%Y-%m-%dT%H:%M:%S%z")
-        .map(|date| utils::get_duration_string(date, Utc::now().fixed_offset()))
-        .unwrap_or_default();
     let display_name = post.author.display_name.clone().unwrap_or_default();
     let handle = post.author.handle.to_string();
     if let ModerationDecision::HideContent { reason } = &decision {
@@ -770,7 +769,7 @@ fn render_post(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("@{handle} {duration}"),
+            format!("@{handle} · {posted_at}"),
             Style::default().fg(theme::MUTED),
         ),
     ]));
@@ -984,6 +983,12 @@ fn safe_post_record(value: &Unknown) -> Option<post::Record> {
         .and_then(|value| serde_json::from_value(value).ok())
 }
 
+fn post_datetime(record: Option<&post::RecordData>) -> String {
+    record
+        .map(|record| utils::format_post_datetime(record.created_at.as_str()))
+        .unwrap_or_else(|| "time unavailable".to_owned())
+}
+
 pub fn notifications(state: &AppState, width: u16, accent: Color) -> PostList<'static> {
     let notifications = state.notification_groups();
     let inner_width = width.saturating_sub(4);
@@ -1063,6 +1068,10 @@ pub fn notifications(state: &AppState, width: u16, accent: Color) -> PostList<'s
                 layout.media_row = layout.media_row.map(|row| row.saturating_add(1));
                 layout
             } else if let Some(record) = safe_post_record(&notification.record) {
+                lines.push(Line::from(Span::styled(
+                    format!("  Posted {}", post_datetime(Some(&record))),
+                    Style::default().fg(theme::MUTED),
+                )));
                 for line in wrap_text(&record.text, content_width.saturating_sub(2)) {
                     lines.push(Line::from(format!("  {line}")));
                 }
@@ -1297,18 +1306,20 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
                 .clone()
                 .unwrap_or_else(|| "".into());
             let handle = search_result.author.handle.to_string();
-            let parent_text =
-                if let Ok(post) = post::Record::try_from_unknown(search_result.record.clone()) {
-                    post.text.clone()
-                } else {
-                    "".to_string()
-                };
+            let parent_record = safe_post_record(&search_result.record);
+            let parent_text = parent_record
+                .as_ref()
+                .map(|post| post.text.clone())
+                .unwrap_or_default();
             let reply_count = search_result.reply_count.unwrap_or(0);
             let repost_count = search_result.repost_count.unwrap_or(0);
             let like_count = search_result.like_count.unwrap_or(0);
 
             return Paragraph::new(vec![
-                Line::from(format!("{display_name} @{handle}")),
+                Line::from(format!(
+                    "{display_name} @{handle} · {}",
+                    post_datetime(parent_record.as_deref())
+                )),
                 Line::from(parent_text),
                 Line::from(vec![
                     Span::styled(
@@ -1349,18 +1360,20 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
         .clone()
         .unwrap_or_else(|| "".into());
     let handle = current_feed.post.author.handle.to_string();
-    let parent_text =
-        if let Ok(post) = post::Record::try_from_unknown(current_feed.post.record.clone()) {
-            post.text.clone()
-        } else {
-            "".to_string()
-        };
+    let parent_record = safe_post_record(&current_feed.post.record);
+    let parent_text = parent_record
+        .as_ref()
+        .map(|post| post.text.clone())
+        .unwrap_or_default();
     let reply_count = current_feed.post.reply_count.unwrap_or(0);
     let repost_count = current_feed.post.repost_count.unwrap_or(0);
     let like_count = current_feed.post.like_count.unwrap_or(0);
 
     Paragraph::new(vec![
-        Line::from(format!("{display_name} @{handle}")),
+        Line::from(format!(
+            "{display_name} @{handle} · {}",
+            post_datetime(parent_record.as_deref())
+        )),
         Line::from(parent_text),
         Line::from(vec![
             Span::styled(

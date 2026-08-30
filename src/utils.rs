@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 
 const SPLASH: &str = r#"
 
@@ -34,10 +34,43 @@ pub fn get_duration_string(t1: DateTime<FixedOffset>, t2: DateTime<FixedOffset>)
     }
 }
 
+/// Formats an AT Protocol datetime as an unambiguous post timestamp.
+///
+/// Keep the original value as a fallback so a timestamp never silently
+/// disappears when a record contains an unexpected datetime representation.
+pub fn format_post_datetime(value: &str) -> String {
+    DateTime::parse_from_rfc3339(value)
+        .map(|datetime| {
+            datetime
+                .with_timezone(&Utc)
+                .format("%Y-%m-%d %H:%M UTC")
+                .to_string()
+        })
+        .unwrap_or_else(|_| value.to_owned())
+}
+
 pub fn get_splash(path: Option<String>) -> String {
     if let Some(path) = path {
         std::fs::read_to_string(path).unwrap_or_else(|_| SPLASH.to_string())
     } else {
         SPLASH.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_post_datetime_in_utc() {
+        assert_eq!(
+            format_post_datetime("2026-08-30T09:15:42+09:00"),
+            "2026-08-30 00:15 UTC"
+        );
+    }
+
+    #[test]
+    fn preserves_unparseable_post_datetime() {
+        assert_eq!(format_post_datetime("unknown"), "unknown");
     }
 }

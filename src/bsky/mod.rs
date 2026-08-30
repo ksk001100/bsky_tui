@@ -44,6 +44,7 @@ use crate::app::feed::{FeedDescriptor, FeedKind};
 use crate::app::moderation::ModerationPrefs;
 use crate::app::profile::{ProfileContent, ProfileListItem, ProfileSection};
 use crate::io::ModerationAction;
+use crate::utils;
 
 pub mod feature_services;
 
@@ -512,17 +513,24 @@ pub async fn post_quotes(agent: &BskyAgent, uri: String, cid: Cid) -> Result<Vec
     Ok(output
         .posts
         .iter()
-        .map(|post| InteractionItem {
-            title: format!(
-                "{} @{}",
-                post.author.display_name.clone().unwrap_or_default(),
-                post.author.handle.as_str()
-            ),
-            subtitle: post::Record::try_from_unknown(post.record.clone())
-                .map(|record| record.text.clone())
-                .unwrap_or_else(|_| "[Post unavailable]".to_owned()),
-            url: get_url(post.author.handle.clone(), post.uri.clone()).unwrap_or_default(),
-            actor: None,
+        .map(|post| {
+            let record = post::Record::try_from_unknown(post.record.clone()).ok();
+            InteractionItem {
+                title: format!(
+                    "{} @{} · {}",
+                    post.author.display_name.clone().unwrap_or_default(),
+                    post.author.handle.as_str(),
+                    record
+                        .as_ref()
+                        .map(|record| utils::format_post_datetime(record.created_at.as_str()))
+                        .unwrap_or_else(|| "time unavailable".to_owned())
+                ),
+                subtitle: record
+                    .map(|record| record.text.clone())
+                    .unwrap_or_else(|| "[Post unavailable]".to_owned()),
+                url: get_url(post.author.handle.clone(), post.uri.clone()).unwrap_or_default(),
+                actor: None,
+            }
         })
         .collect())
 }
@@ -1149,14 +1157,20 @@ fn video_lines(video: &atrium_api::app::bsky::embed::video::View) -> Vec<String>
 fn record_lines(record: &atrium_api::app::bsky::embed::record::View) -> Vec<String> {
     match &record.record {
         Union::Refs(ViewRecordRefs::ViewRecord(quoted)) => {
-            let text = post::Record::try_from_unknown(quoted.value.clone())
+            let record = post::Record::try_from_unknown(quoted.value.clone()).ok();
+            let text = record
+                .as_ref()
                 .map(|record| record.text.clone())
-                .unwrap_or_else(|_| "[Quoted record unavailable]".to_owned());
+                .unwrap_or_else(|| "[Quoted record unavailable]".to_owned());
             vec![
                 format!(
-                    "Quote: {} @{}",
+                    "Quote: {} @{} · {}",
                     quoted.author.display_name.clone().unwrap_or_default(),
-                    quoted.author.handle.as_str()
+                    quoted.author.handle.as_str(),
+                    record
+                        .as_ref()
+                        .map(|record| utils::format_post_datetime(record.created_at.as_str()))
+                        .unwrap_or_else(|| "time unavailable".to_owned())
                 ),
                 text,
             ]
