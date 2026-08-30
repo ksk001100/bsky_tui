@@ -1,5 +1,6 @@
 mod draw;
 mod layout;
+mod theme;
 
 pub(crate) use draw::HELP_ROW_COUNT;
 
@@ -8,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Position},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::{Resize, StatefulImage};
@@ -25,13 +26,14 @@ where
     let header_chunks = layout::header(main_chunks[0]);
     let body_chunks = layout::body(main_chunks[1]);
 
-    let title = draw::title();
+    let accent = app.accent_color();
+    let title = draw::title(accent);
     f.render_widget(title, header_chunks[0]);
 
-    let mode = draw::mode(app.state());
+    let mode = draw::mode(app.state(), accent);
     f.render_widget(mode, header_chunks[1]);
 
-    let tabs = draw::tabs(app.state());
+    let tabs = draw::tabs(app.state(), accent);
     f.render_widget(tabs, body_chunks[0]);
 
     if app.is_loading() {
@@ -42,21 +44,21 @@ where
     } else if app.content_mode() == crate::app::state::Mode::Profile {
         render_profile(f, app, body_chunks[1]);
     } else if app.content_mode() == crate::app::state::Mode::Thread {
-        let thread = draw::thread(app.state(), body_chunks[1].width);
+        let thread = draw::thread(app.state(), body_chunks[1].width, accent);
         let mut list_state = app.state.get_thread_list_state();
         list_state.select(Some(app.state.get_thread_list_position()));
         f.render_stateful_widget(thread, body_chunks[1], &mut list_state);
     } else {
         match app.state.get_tab() {
             Tab::Home => {
-                let posts = draw::timeline(app.state(), body_chunks[1].width);
+                let posts = draw::timeline(app.state(), body_chunks[1].width, accent);
                 let mut list_state = app.state.get_tl_list_state();
                 list_state.select(Some(app.state.get_tl_list_position()));
                 f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
                 render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
             }
             Tab::Notifications => {
-                let body = draw::notifications(app.state());
+                let body = draw::notifications(app.state(), accent);
                 app.state
                     .get_notifications_list_state()
                     .select(Some(app.state.get_notifications_list_position()));
@@ -67,7 +69,7 @@ where
                 );
             }
             Tab::Search => {
-                let posts = draw::search_results(app.state(), body_chunks[1].width);
+                let posts = draw::search_results(app.state(), body_chunks[1].width, accent);
                 let mut list_state = app.state.get_search_list_state();
                 list_state.select(Some(app.state.get_search_list_position()));
                 f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
@@ -76,18 +78,22 @@ where
         };
     }
 
-    f.render_widget(draw::key_hints(app.key_hints()), main_chunks[2]);
+    f.render_widget(draw::key_hints(app.key_hints(), accent), main_chunks[2]);
 
     if let Some(settings) = app.notification_settings.as_ref() {
         let area = layout::popup(88, 78, size);
         let mut state =
             ratatui::widgets::ListState::default().with_selected(Some(settings.category));
         f.render_widget(Clear, area);
-        f.render_stateful_widget(draw::notification_settings(settings), area, &mut state);
+        f.render_stateful_widget(
+            draw::notification_settings(settings, accent),
+            area,
+            &mut state,
+        );
     }
 
     if app.state.is_help_mode() {
-        let popup = draw::help();
+        let popup = draw::help(accent);
         let area = layout::popup(90, 80, size);
         f.render_widget(Clear, area);
         f.render_stateful_widget(popup, area, &mut app.help_table_state);
@@ -149,7 +155,7 @@ where
     }
 
     if let Some((facets, selected)) = app.current_facet_viewer() {
-        let popup = draw::facets(facets);
+        let popup = draw::facets(facets, accent);
         let area = layout::popup(80, 60, size);
         let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(selected));
         f.render_widget(Clear, area);
@@ -157,7 +163,7 @@ where
     }
 
     if let Some((kind, items, selected)) = app.current_interactions() {
-        let popup = draw::interactions(kind, items);
+        let popup = draw::interactions(kind, items, accent);
         let area = layout::popup(80, 70, size);
         let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(selected));
         f.render_widget(Clear, area);
@@ -165,7 +171,7 @@ where
     }
 
     if let Some((items, selected)) = app.current_feed_viewer() {
-        let popup = draw::feed_picker(items);
+        let popup = draw::feed_picker(items, accent);
         let area = layout::popup(85, 75, size);
         let mut list_state = ratatui::widgets::ListState::default().with_selected(Some(selected));
         f.render_widget(Clear, area);
@@ -176,8 +182,14 @@ where
         let area = layout::popup(55, 60, size);
         let rows = items.into_iter().map(ListItem::new).collect::<Vec<_>>();
         let widget = List::new(rows)
-            .block(Block::default().borders(Borders::ALL).title(" Actions "))
-            .highlight_style(Style::default().bg(app.accent_color()).fg(Color::White));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(theme::border(accent))
+                    .title(" Actions "),
+            )
+            .highlight_style(theme::selected(accent));
         let mut state = ListState::default().with_selected(Some(selected));
         f.render_widget(Clear, area);
         f.render_stateful_widget(widget, area, &mut state);
@@ -190,7 +202,6 @@ where
         f.render_widget(popup, area);
     }
 
-    let accent = app.accent_color();
     if let Some(panel) = app.feature_panel() {
         let area = layout::popup(92, 86, size);
         let items = if panel.rows.is_empty() {
@@ -220,10 +231,12 @@ where
             .block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(theme::border(accent))
                     .title(format!(" {} ", panel.title))
                     .title_bottom(" n new  a add  e edit  x delete  s save/subscribe  f feed  w write  q/Esc back "),
             )
-            .highlight_style(Style::default().bg(accent).fg(Color::White));
+            .highlight_style(theme::selected(accent));
         let mut state =
             ListState::default().with_selected((!panel.rows.is_empty()).then_some(panel.selected));
         f.render_widget(Clear, area);
@@ -238,6 +251,8 @@ where
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .border_style(theme::border(accent))
                             .title(format!(" {} ", prompt.label)),
                     )
                     .wrap(Wrap { trim: false }),
@@ -266,6 +281,7 @@ where
 }
 
 fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let accent = app.accent_color();
     let Some(profile) = app.state.get_profile() else {
         return;
     };
@@ -302,6 +318,7 @@ fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             profile.details.avatar.as_deref(),
             header[0],
             "Avatar",
+            accent,
         );
         render_profile_image(
             f,
@@ -309,20 +326,26 @@ fn render_profile(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
             profile.details.banner.as_deref(),
             header[1],
             "Banner",
+            accent,
         );
     }
-    f.render_widget(draw::profile_header(&profile), header[2]);
-    f.render_widget(draw::profile_tabs(&profile), chunks[1]);
+    f.render_widget(draw::profile_header(&profile, accent), header[2]);
+    f.render_widget(draw::profile_tabs(&profile, accent), chunks[1]);
 
     let mut list_state = profile.list_state;
     match &profile.content {
         crate::app::profile::ProfileContent::Posts(_) => {
-            let posts = draw::profile_posts(&profile, app.state.moderation(), chunks[2].width);
+            let posts =
+                draw::profile_posts(&profile, app.state.moderation(), chunks[2].width, accent);
             f.render_stateful_widget(posts.widget, chunks[2], &mut list_state);
             render_post_images(f, app, &posts.layouts, chunks[2], list_state.offset());
         }
         crate::app::profile::ProfileContent::Items(_) => {
-            f.render_stateful_widget(draw::profile_items(&profile), chunks[2], &mut list_state);
+            f.render_stateful_widget(
+                draw::profile_items(&profile, accent),
+                chunks[2],
+                &mut list_state,
+            );
         }
     }
 }
@@ -333,9 +356,12 @@ fn render_profile_image(
     url: Option<&str>,
     area: ratatui::layout::Rect,
     title: &str,
+    accent: Color,
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border(accent))
         .title(format!(" {title} "));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -388,9 +414,13 @@ fn render_image_viewer(
     screen: ratatui::layout::Rect,
 ) {
     let area = layout::popup(90, 90, screen);
-    let block = Block::default().borders(Borders::ALL).title(format!(
-        " Image {index}/{total}  h/← previous  l/→ next  q/Esc close "
-    ));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border(app.accent_color()))
+        .title(format!(
+            " Image {index}/{total}  h/← previous  l/→ next  q/Esc close "
+        ));
     let inner = block.inner(area);
     f.render_widget(Clear, area);
     f.render_widget(block, area);

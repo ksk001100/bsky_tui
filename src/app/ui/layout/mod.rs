@@ -6,7 +6,7 @@ pub fn main(rect: Rect) -> Rc<[Rect]> {
     Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(1),
             Constraint::Min(1),
             Constraint::Length(1),
         ])
@@ -16,15 +16,15 @@ pub fn main(rect: Rect) -> Rc<[Rect]> {
 
 pub fn header(rect: Rect) -> Rc<[Rect]> {
     Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(rect)
 }
 
 pub fn body(rect: Rect) -> Rc<[Rect]> {
     Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Percentage(90)])
+        .constraints([Constraint::Length(3), Constraint::Min(1)])
         .split(rect)
 }
 
@@ -86,4 +86,20 @@ pub fn reply_popup(rect: Rect) -> Rect {
             Constraint::Percentage(20),
         ])
         .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chrome_uses_one_header_row_and_preserves_the_footer() {
+        let chunks = main(Rect::new(0, 0, 100, 30));
+        assert_eq!(chunks[0].height, 1);
+        assert_eq!(chunks[2].height, 1);
+
+        let header_chunks = header(chunks[0]);
+        assert_eq!(header_chunks[0].height, 1);
+        assert_eq!(header_chunks[1].height, 1);
+    }
 }

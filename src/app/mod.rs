@@ -2430,13 +2430,13 @@ impl App {
 
     pub fn accent_color(&self) -> ratatui::style::Color {
         match self.ui_config.accent_color.to_ascii_lowercase().as_str() {
-            "red" => ratatui::style::Color::Red,
-            "green" => ratatui::style::Color::Green,
-            "yellow" => ratatui::style::Color::Yellow,
-            "magenta" => ratatui::style::Color::Magenta,
-            "cyan" => ratatui::style::Color::Cyan,
+            "red" => ratatui::style::Color::LightRed,
+            "green" => ratatui::style::Color::LightGreen,
+            "yellow" => ratatui::style::Color::LightYellow,
+            "magenta" => ratatui::style::Color::LightMagenta,
+            "cyan" => ratatui::style::Color::LightCyan,
             "white" => ratatui::style::Color::White,
-            _ => ratatui::style::Color::Blue,
+            _ => ratatui::style::Color::LightBlue,
         }
     }
 

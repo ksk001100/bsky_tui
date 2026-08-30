@@ -11,6 +11,7 @@ use ratatui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::theme;
 use crate::io::InteractionKind;
 use crate::{
     app::feed::FeedDescriptor,
@@ -23,6 +24,7 @@ use crate::{
 
 pub fn notification_settings(
     settings: &crate::app::notifications::NotificationSettings,
+    accent: Color,
 ) -> List<'static> {
     fn filterable(name: &str, include: &str, list: bool, push: bool) -> ListItem<'static> {
         ListItem::new(format!(
@@ -98,40 +100,36 @@ pub fn notification_settings(
             on_off(activity.reply)
         )));
     }
-    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
-        Block::default().borders(Borders::ALL).title(
+    List::new(items).highlight_style(theme::selected(accent)).block(
+        Block::default().borders(Borders::ALL).border_type(BorderType::Rounded).border_style(theme::border(accent)).title(
             " Notification settings — Space list / p push / i audience / v activity / q/Esc close ",
         ),
     )
 }
 
-const FOCUSED_POST_STYLE: Style = Style::new()
-    .fg(Color::Black)
-    .bg(Color::LightCyan)
-    .add_modifier(Modifier::BOLD);
-
-pub fn title<'a>() -> Paragraph<'a> {
+pub fn title<'a>(accent: Color) -> Paragraph<'a> {
     Paragraph::new(format!(
         "{} {}",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION")
     ))
-    .style(Style::default().fg(Color::LightCyan))
+    .style(theme::accent(accent))
+    .alignment(Alignment::Left)
+}
+
+pub fn mode<'a>(state: &AppState, accent: Color) -> Paragraph<'a> {
+    Paragraph::new(format!(" {} ", state.get_mode()))
+        .style(theme::accent(accent))
+        .alignment(Alignment::Right)
+}
+
+pub fn key_hints(hints: &str, accent: Color) -> Paragraph<'_> {
+    Paragraph::new(Line::from(vec![
+        Span::styled(" KEYS ", theme::selected(accent)),
+        Span::styled("  ·  ", Style::default().fg(theme::MUTED)),
+        Span::styled(hints, Style::default().fg(theme::TEXT)),
+    ]))
     .alignment(Alignment::Center)
-    .block(Block::default().style(Style::default().fg(Color::White)))
-}
-
-pub fn mode<'a>(state: &AppState) -> Paragraph<'a> {
-    Paragraph::new(format!("{}", state.get_mode()))
-        .style(Style::default().fg(Color::LightCyan))
-        .alignment(Alignment::Center)
-        .block(Block::default().style(Style::default().fg(Color::White)))
-}
-
-pub fn key_hints(hints: &str) -> Paragraph<'_> {
-    Paragraph::new(hints)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center)
 }
 
 pub fn splash<'a>(text: String) -> Paragraph<'a> {
@@ -200,31 +198,36 @@ pub fn link_preview(preview: bsky::LinkPreview) -> Paragraph<'static> {
     )
 }
 
-pub fn facets(facets: Vec<bsky::PostFacet>) -> List<'static> {
+pub fn facets(facets: Vec<bsky::PostFacet>, accent: Color) -> List<'static> {
     let items = facets
         .into_iter()
         .map(|facet| {
             ListItem::new(vec![
                 Line::from(vec![
-                    Span::styled(
-                        format!("{}: ", facet.kind),
-                        Style::default().fg(Color::LightCyan),
-                    ),
+                    Span::styled(format!("{}: ", facet.kind), theme::accent(accent)),
                     Span::raw(facet.label),
                 ]),
                 Line::from(Span::styled(facet.url, Style::default().fg(Color::Gray))),
             ])
         })
         .collect::<Vec<_>>();
-    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
-        Block::default()
-            .title(" Links — ↑/↓ select, Enter open, q/Esc close ")
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 1, 1, 1)),
-    )
+    List::new(items)
+        .highlight_style(theme::selected(accent))
+        .block(
+            Block::default()
+                .title(" Links — ↑/↓ select, Enter open, q/Esc close ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(theme::border(accent))
+                .padding(Padding::new(1, 1, 1, 1)),
+        )
 }
 
-pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) -> List<'static> {
+pub fn interactions(
+    kind: InteractionKind,
+    items: Vec<bsky::InteractionItem>,
+    accent: Color,
+) -> List<'static> {
     let title = match kind {
         InteractionKind::Likes => " Likes ",
         InteractionKind::Reposts => " Reposts ",
@@ -241,15 +244,19 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
             .map(|item| ListItem::new(vec![Line::from(item.title), Line::from(item.subtitle)]))
             .collect()
     };
-    List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
-        Block::default()
-            .title(format!("{title}— ↑/↓ select, Enter open, q/Esc close "))
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 1, 1, 1)),
-    )
+    List::new(rows)
+        .highlight_style(theme::selected(accent))
+        .block(
+            Block::default()
+                .title(format!("{title}— ↑/↓ select, Enter open, q/Esc close "))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(theme::border(accent))
+                .padding(Padding::new(1, 1, 1, 1)),
+        )
 }
 
-pub fn feed_picker(items: Vec<FeedDescriptor>) -> List<'static> {
+pub fn feed_picker(items: Vec<FeedDescriptor>, accent: Color) -> List<'static> {
     let rows = if items.is_empty() {
         vec![ListItem::new("(No feeds found)")]
     } else {
@@ -264,22 +271,26 @@ pub fn feed_picker(items: Vec<FeedDescriptor>) -> List<'static> {
                 ListItem::new(vec![
                     Line::from(Span::styled(
                         format!("{flags}{}", feed.name),
-                        Style::default().fg(Color::LightCyan),
+                        theme::accent(accent),
                     )),
                     Line::from(feed.description),
                 ])
             })
             .collect()
     };
-    List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
-        Block::default()
-            .title(" Feeds — Enter select, / search, s save/unsave, q/Esc close ")
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 1, 1, 1)),
-    )
+    List::new(rows)
+        .highlight_style(theme::selected(accent))
+        .block(
+            Block::default()
+                .title(" Feeds — Enter select, / search, s save/unsave, q/Esc close ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(theme::border(accent))
+                .padding(Padding::new(1, 1, 1, 1)),
+        )
 }
 
-pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
+pub fn profile_header(profile: &ProfileState, accent: Color) -> Paragraph<'static> {
     let details = &profile.details;
     let display_name = details.display_name.clone().unwrap_or_default();
     let relationship = if details
@@ -326,9 +337,7 @@ pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
     Paragraph::new(vec![
         Line::from(Span::styled(
             display_name,
-            Style::default()
-                .fg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(accent).add_modifier(Modifier::BOLD),
         )),
         Line::from(format!("@{}", details.handle.as_str())),
         Line::from(format!("DID: {}", details.did.as_str())),
@@ -344,10 +353,16 @@ pub fn profile_header(profile: &ProfileState) -> Paragraph<'static> {
         Line::from(details.description.clone().unwrap_or_default()),
     ])
     .wrap(ratatui::widgets::Wrap { trim: true })
-    .block(Block::default().borders(Borders::ALL).title(" Profile "))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(theme::border(accent))
+            .title(" Profile "),
+    )
 }
 
-pub fn profile_tabs(profile: &ProfileState) -> Tabs<'static> {
+pub fn profile_tabs(profile: &ProfileState, accent: Color) -> Tabs<'static> {
     let selected = ProfileSection::ALL
         .iter()
         .position(|section| *section == profile.section)
@@ -359,15 +374,13 @@ pub fn profile_tabs(profile: &ProfileState) -> Tabs<'static> {
             .collect::<Vec<_>>(),
     )
     .select(selected)
-    .highlight_style(
-        Style::default()
-            .fg(Color::LightCyan)
-            .add_modifier(Modifier::BOLD),
-    )
+    .highlight_style(Style::default().fg(accent).add_modifier(Modifier::BOLD))
     .divider(" | ")
     .block(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(theme::border(accent))
             .title(" h/l switch section "),
     )
 }
@@ -376,6 +389,7 @@ pub fn profile_posts(
     profile: &ProfileState,
     moderation: ModerationPrefs,
     width: u16,
+    accent: Color,
 ) -> PostList<'static> {
     let posts = match &profile.content {
         ProfileContent::Posts(posts) => posts
@@ -384,31 +398,40 @@ pub fn profile_posts(
             .collect(),
         ProfileContent::Items(_) => Vec::new(),
     };
-    post_list(posts, moderation, width, profile.section.label().to_owned())
+    post_list(
+        posts,
+        moderation,
+        width,
+        profile.section.label().to_owned(),
+        accent,
+    )
 }
 
-pub fn profile_items(profile: &ProfileState) -> List<'static> {
+pub fn profile_items(profile: &ProfileState, accent: Color) -> List<'static> {
     let items = match &profile.content {
         ProfileContent::Items(items) if !items.is_empty() => items
             .iter()
             .map(|item| {
                 ListItem::new(vec![
-                    Line::from(Span::styled(
-                        item.title.clone(),
-                        Style::default().fg(Color::LightCyan),
-                    )),
+                    Line::from(Span::styled(item.title.clone(), theme::accent(accent))),
                     Line::from(item.subtitle.clone()),
                 ])
             })
             .collect(),
         _ => vec![ListItem::new("(No results)")],
     };
-    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
-        Block::default().borders(Borders::ALL).title(format!(
-            " {} — ↑/↓ select, Enter open, q/Esc back ",
-            profile.section.label()
-        )),
-    )
+    List::new(items)
+        .highlight_style(theme::selected(accent))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(theme::border(accent))
+                .title(format!(
+                    " {} — ↑/↓ select, Enter open, q/Esc back ",
+                    profile.section.label()
+                )),
+        )
 }
 
 const HELP_ROWS: &[(&str, &str, &str)] = &[
@@ -470,10 +493,8 @@ const HELP_ROWS: &[(&str, &str, &str)] = &[
 
 pub(crate) const HELP_ROW_COUNT: usize = HELP_ROWS.len();
 
-pub fn help<'a>() -> Table<'a> {
-    let header_style = Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD);
+pub fn help<'a>(accent: Color) -> Table<'a> {
+    let header_style = Style::default().fg(accent).add_modifier(Modifier::BOLD);
     let header = Row::new(["Context", "Keys", "Action"])
         .style(header_style)
         .bottom_margin(1);
@@ -494,14 +515,15 @@ pub fn help<'a>() -> Table<'a> {
         ],
     )
     .header(header)
-    .row_highlight_style(FOCUSED_POST_STYLE)
+    .row_highlight_style(theme::selected(accent))
     .highlight_symbol("▸ ")
     .block(
         Block::default()
             .title(" Keyboard help — ↑/↓ move, PgUp/PgDn jump, q/Esc close ")
             .borders(Borders::ALL)
+            .border_style(theme::border(accent))
             .style(Style::default().fg(Color::White).bg(Color::Black))
-            .border_type(BorderType::Plain),
+            .border_type(BorderType::Rounded),
     )
     .column_spacing(1)
 }
@@ -529,7 +551,7 @@ pub struct ImagePlacement {
     pub area: Rect,
 }
 
-pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
+pub fn timeline(state: &AppState, width: u16, accent: Color) -> PostList<'static> {
     let posts = state
         .get_timeline()
         .unwrap_or_default()
@@ -550,10 +572,11 @@ pub fn timeline(state: &AppState, width: u16) -> PostList<'static> {
                 count => format!(", {count} new"),
             }
         ),
+        accent,
     )
 }
 
-pub fn search_results(state: &AppState, width: u16) -> PostList<'static> {
+pub fn search_results(state: &AppState, width: u16, accent: Color) -> PostList<'static> {
     post_list(
         state
             .get_search_results()
@@ -568,10 +591,11 @@ pub fn search_results(state: &AppState, width: u16) -> PostList<'static> {
             state.get_search_current_cursor_index() + 1,
             state.get_search_results().unwrap_or_default().len()
         ),
+        accent,
     )
 }
 
-pub fn thread(state: &AppState, width: u16) -> List<'static> {
+pub fn thread(state: &AppState, width: u16, accent: Color) -> List<'static> {
     let moderation = state.moderation();
     let inner_width = width.saturating_sub(4).max(1) as usize;
     let items = state
@@ -636,12 +660,16 @@ pub fn thread(state: &AppState, width: u16) -> List<'static> {
         })
         .collect::<Vec<_>>();
 
-    List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .padding(Padding::new(1, 1, 1, 1))
-            .title("Thread — j/k move, b browser, e embed, f facets, q/Esc close"),
-    )
+    List::new(items)
+        .highlight_style(theme::selected(accent))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(theme::border(accent))
+                .padding(Padding::new(1, 1, 1, 1))
+                .title("Thread — j/k move, b browser, e embed, f facets, q/Esc close"),
+        )
 }
 
 fn post_list(
@@ -649,6 +677,7 @@ fn post_list(
     moderation: ModerationPrefs,
     width: u16,
     title: String,
+    accent: Color,
 ) -> PostList<'static> {
     let inner_width = width.saturating_sub(4);
     let rendered = posts
@@ -662,14 +691,17 @@ fn post_list(
         .collect::<Vec<_>>();
 
     PostList {
-        widget: List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .style(Style::default())
-                .padding(Padding::new(1, 1, 1, 1))
-                .title(title)
-                .border_type(BorderType::Plain),
-        ),
+        widget: List::new(items)
+            .highlight_style(theme::selected_content())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(theme::border(accent))
+                    .style(Style::default())
+                    .padding(Padding::new(1, 1, 1, 1))
+                    .title(title)
+                    .border_type(BorderType::Rounded),
+            ),
         layouts,
     }
 }
@@ -709,7 +741,9 @@ fn render_post(
         .map(|line| {
             Line::from(Span::styled(
                 line.clone(),
-                Style::default().fg(Color::LightCyan),
+                Style::default()
+                    .fg(Color::LightBlue)
+                    .add_modifier(Modifier::ITALIC),
             ))
         })
         .collect::<Vec<_>>();
@@ -717,11 +751,13 @@ fn render_post(
         Span::raw(prefix.clone()),
         Span::styled(
             format!("{display_name}{} ", bsky::verification_badge(post)),
-            Style::default().fg(Color::White),
+            Style::default()
+                .fg(theme::TEXT)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("@{handle} {duration}"),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(theme::MUTED),
         ),
     ]));
 
@@ -775,15 +811,15 @@ fn render_post(
         Span::raw(prefix),
         Span::styled(
             format!("↩ {}", post.reply_count.unwrap_or(0)),
-            Style::default().fg(Color::Gray),
+            Style::default().fg(theme::MUTED),
         ),
         Span::styled(
             format!("   🔁 {}", post.repost_count.unwrap_or(0)),
-            Style::default().fg(Color::Green),
+            Style::default().fg(theme::POSITIVE),
         ),
         Span::styled(
             format!("   ❤ {}", post.like_count.unwrap_or(0)),
-            Style::default().fg(Color::Red),
+            Style::default().fg(theme::NEGATIVE),
         ),
     ]));
 
@@ -791,8 +827,8 @@ fn render_post(
         lines.push(Line::from(" ".repeat(inner_width as usize)));
     }
     lines.push(Line::from(Span::styled(
-        "=".repeat(inner_width as usize),
-        Style::default().fg(Color::Gray),
+        "─".repeat(inner_width as usize),
+        Style::default().fg(theme::SUBTLE),
     )));
 
     let layout = PostLayout {
@@ -922,11 +958,9 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     output
 }
 
-pub fn notifications<'a>(state: &AppState) -> List<'a> {
+pub fn notifications<'a>(state: &AppState, accent: Color) -> List<'a> {
     let notifications = state.notification_groups();
     let my_handle = state.get_handle();
-    let size = crossterm::terminal::size().unwrap_or((80, 24));
-    let border = "=".repeat(size.0.saturating_sub(4) as usize);
 
     let list_items: Vec<ListItem> = if notifications.is_empty() {
         vec![]
@@ -947,15 +981,17 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     "reply" => Span::styled("↩", Style::default().fg(Color::Gray)),
                     "repost" => Span::styled("🔁", Style::default().fg(Color::Green)),
                     "like" => Span::styled("❤", Style::default().fg(Color::Red)),
-                    "follow" => Span::styled("➕", Style::default().fg(Color::Blue)),
+                    "follow" => Span::styled("➕", Style::default().fg(Color::LightBlue)),
                     "mention" => Span::styled("🔔", Style::default().fg(Color::Yellow)),
                     "quote" => Span::styled("📣", Style::default().fg(Color::Magenta)),
                     "subscribed-post" => Span::styled("★", Style::default().fg(Color::Cyan)),
                     "like-via-repost" | "repost-via-repost" => {
                         Span::styled("↗", Style::default().fg(Color::Green))
                     }
-                    "starterpack-joined" => Span::styled("✦", Style::default().fg(Color::Blue)),
-                    "verified" => Span::styled("✓", Style::default().fg(Color::Blue)),
+                    "starterpack-joined" => {
+                        Span::styled("✦", Style::default().fg(Color::LightBlue))
+                    }
+                    "verified" => Span::styled("✓", Style::default().fg(Color::LightBlue)),
                     "unverified" => Span::styled("?", Style::default().fg(Color::Yellow)),
                     _ => Span::from(""),
                 };
@@ -1022,54 +1058,44 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                         Line::from(vec![
                             Span::styled(
                                 format!("{read_marker} "),
-                                Style::default().fg(if unread {
-                                    Color::Cyan
-                                } else {
-                                    Color::DarkGray
-                                }),
+                                Style::default().fg(if unread { accent } else { Color::DarkGray }),
                             ),
                             reason_icon,
                             Span::styled(
                                 format!(" {} ", display_name),
-                                Style::default().fg(Color::White),
+                                Style::default()
+                                    .fg(theme::TEXT)
+                                    .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(
                                 format!("@{} {}{}", handle, duration_text, grouped),
-                                Style::default().fg(Color::Gray),
+                                Style::default().fg(theme::MUTED),
                             ),
                         ]),
                         Line::from(reason_subject),
                         Line::from(subject),
-                        Line::from(Span::styled(
-                            border.clone(),
-                            Style::default().fg(Color::Gray),
-                        )),
+                        Line::from(""),
                     ],
                     None => vec![
                         Line::from(vec![
                             Span::styled(
                                 format!("{read_marker} "),
-                                Style::default().fg(if unread {
-                                    Color::Cyan
-                                } else {
-                                    Color::DarkGray
-                                }),
+                                Style::default().fg(if unread { accent } else { Color::DarkGray }),
                             ),
                             reason_icon,
                             Span::styled(
                                 format!(" {display_name} "),
-                                Style::default().fg(Color::White),
+                                Style::default()
+                                    .fg(theme::TEXT)
+                                    .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(
                                 format!("@{handle} {duration_text}{grouped}"),
-                                Style::default().fg(Color::Gray),
+                                Style::default().fg(theme::MUTED),
                             ),
                         ]),
                         Line::from(reason_subject),
-                        Line::from(Span::styled(
-                            border.clone(),
-                            Style::default().fg(Color::Gray),
-                        )),
+                        Line::from(""),
                     ],
                 };
 
@@ -1081,10 +1107,11 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
     let filters = state.notification_filters();
 
     List::new(list_items)
-        .highlight_style(FOCUSED_POST_STYLE)
+        .highlight_style(theme::selected_content())
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(theme::border(accent))
                 .style(Style::default())
                 .padding(Padding::new(1, 1, 1, 1))
                 .title(format!(
@@ -1095,7 +1122,7 @@ pub fn notifications<'a>(state: &AppState) -> List<'a> {
                     filters.sender.label(),
                     filters.read.label(),
                 ))
-                .border_type(BorderType::Plain),
+                .border_type(BorderType::Rounded),
         )
 }
 
@@ -1250,22 +1277,24 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
     )
 }
 
-pub fn tabs<'a>(state: &AppState) -> Tabs<'a> {
+pub fn tabs<'a>(state: &AppState, accent: Color) -> Tabs<'a> {
     let titles: Vec<_> = [Tab::Home, Tab::Notifications, Tab::Search]
         .iter()
-        .map(|t| format!("{}", t))
+        .map(|t| format!("  {}  ", t))
         .collect();
 
     Tabs::new(titles)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .style(Style::default())
-                .border_type(BorderType::Plain),
+                .border_style(theme::border(accent))
+                .style(Style::default().fg(theme::MUTED))
+                .border_type(BorderType::Rounded),
         )
         .select(state.get_tab() as usize)
-        .style(Style::default().fg(Color::White))
-        .highlight_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().fg(theme::MUTED))
+        .highlight_style(theme::selected(accent))
+        .divider(Span::styled(" │ ", Style::default().fg(theme::SUBTLE)))
 }
 
 #[cfg(test)]
