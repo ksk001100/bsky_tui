@@ -5,7 +5,7 @@ pub mod io;
 pub mod logging;
 pub mod utils;
 
-use std::{io::stdout, sync::Arc, time::Duration};
+use std::{io::stdout, time::Duration};
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -23,7 +23,7 @@ use crate::{
 };
 
 pub async fn start_ui(
-    app: &Arc<tokio::sync::Mutex<App>>,
+    mut app: App,
     command_tx: tokio::sync::mpsc::Sender<Command>,
     effect_rx: tokio::sync::mpsc::Receiver<EffectEnvelope>,
     skip_splash: bool,
@@ -37,11 +37,11 @@ pub async fn start_ui(
     terminal.hide_cursor()?;
 
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
-    app.lock().await.configure_images(picker);
+    app.configure_images(picker);
 
     let result = run_ui(
         &mut terminal,
-        app,
+        &mut app,
         &command_tx,
         effect_rx,
         skip_splash,
@@ -58,7 +58,7 @@ pub async fn start_ui(
 
 async fn run_ui(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    app: &Arc<tokio::sync::Mutex<App>>,
+    app: &mut App,
     command_tx: &tokio::sync::mpsc::Sender<Command>,
     mut effect_rx: tokio::sync::mpsc::Receiver<EffectEnvelope>,
     skip_splash: bool,
@@ -67,12 +67,8 @@ async fn run_ui(
     let tick_rate = Duration::from_millis(200);
     let mut events = Events::new(tick_rate);
 
-    {
-        let mut model = app.lock().await;
-        let update = model.init();
-        drop(model);
-        execute_commands(app, command_tx, update.commands).await?;
-    }
+    let update = app.init();
+    execute_commands(app, command_tx, update.commands).await?;
 
     if !skip_splash {
         let mut split_splash: Vec<String> = splash.split('\n').map(|s| s.to_string()).collect();
@@ -85,24 +81,21 @@ async fn run_ui(
             })?;
 
             loop {
-                let initialized = {
-                    let app = app.lock().await;
-                    app.state.get_timeline().is_some() || app.error().is_some()
-                };
+                let initialized = app.state.get_timeline().is_some() || app.error().is_some();
                 if initialized {
                     break;
                 }
                 tokio::select! {
                     envelope = effect_rx.recv() => {
                         let envelope = envelope.ok_or_else(|| eyre::eyre!("effect runtime is unavailable"))?;
-                        let update = apply_effect(app, envelope).await;
+                        let update = apply_effect(app, envelope);
                         execute_commands(app, command_tx, update.commands).await?;
                     }
                     _ = tokio::time::sleep(Duration::from_millis(10)) => {}
                 }
             }
 
-            if app.lock().await.error().is_some() {
+            if app.error().is_some() {
                 break;
             }
 
@@ -112,15 +105,10 @@ async fn run_ui(
     }
 
     loop {
-        {
-            let mut app = app.lock().await;
-            terminal
-                .draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, &mut app))?;
-        }
+        terminal.draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, app))?;
 
         let update = tokio::select! {
             input = events.next() => {
-                let mut app = app.lock().await;
                 match input {
                     InputEvent::Input(key) => app.update(Message::KeyPressed(key)),
                     InputEvent::Mouse(mouse) => app.update(Message::Mouse(mouse)),
@@ -133,7 +121,7 @@ async fn run_ui(
             }
             envelope = effect_rx.recv() => {
                 let envelope = envelope.ok_or_else(|| eyre::eyre!("effect runtime is unavailable"))?;
-                apply_effect(app, envelope).await
+                apply_effect(app, envelope)
             }
         };
         execute_commands(app, command_tx, update.commands).await?;
@@ -147,30 +135,26 @@ async fn run_ui(
     Ok(())
 }
 
-async fn apply_effect(app: &Arc<tokio::sync::Mutex<App>>, envelope: EffectEnvelope) -> Update {
-    let (update, context) = {
-        let mut app = app.lock().await;
-        let update = app.update(Message::effect(envelope.message));
-        let context = app.effect_context();
-        (update, context)
-    };
+fn apply_effect(app: &mut App, envelope: EffectEnvelope) -> Update {
+    let update = app.update(Message::effect(envelope.message));
+    let context = app.effect_context();
     let _ = envelope.applied.send(context);
     update
 }
 
 async fn execute_commands(
-    app: &Arc<tokio::sync::Mutex<App>>,
+    app: &mut App,
     command_tx: &tokio::sync::mpsc::Sender<Command>,
     commands: Vec<Command>,
 ) -> Result<()> {
     for command in commands {
         match command {
-            Command::LoadImages(urls) => app.lock().await.queue_images(urls),
-            Command::PollImages => app.lock().await.poll_images(),
+            Command::LoadImages(urls) => app.queue_images(urls),
+            Command::PollImages => app.poll_images(),
             Command::OpenUrl { url, error_context } => {
                 if let Err(error) = webbrowser::open(&url) {
                     let message = format!("{error_context}: {error}");
-                    let update = app.lock().await.update(Message::effect(
+                    let update = app.update(Message::effect(
                         crate::app::message::EffectMessage::RuntimeError(message),
                     ));
                     debug_assert!(update.commands.is_empty());
@@ -179,7 +163,7 @@ async fn execute_commands(
             Command::CopyToClipboard { value, label } => {
                 if let Err(error) = crate::app::copy_osc52(&value) {
                     let message = format!("Could not copy {label}: {error}");
-                    let update = app.lock().await.update(Message::effect(
+                    let update = app.update(Message::effect(
                         crate::app::message::EffectMessage::RuntimeError(message),
                     ));
                     debug_assert!(update.commands.is_empty());

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use seahorse::{App as SeahorseApp, Command, Context};
 
 use bsky_tui::{
@@ -45,9 +43,6 @@ async fn action(_c: &Context) {
     let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<AppCommand>(100);
     let (effect_tx, effect_rx) = tokio::sync::mpsc::channel::<EffectEnvelope>(100);
 
-    let app = Arc::new(tokio::sync::Mutex::new(App::new()));
-    let app_ui = Arc::clone(&app);
-
     tokio::spawn(async move {
         let mut handler = IoAsyncHandler::new(effect_tx);
         while let Some(command) = command_rx.recv().await {
@@ -62,7 +57,7 @@ async fn action(_c: &Context) {
     });
 
     if let Err(error) = start_ui(
-        &app_ui,
+        App::new(),
         command_tx,
         effect_rx,
         config.skip_splash,
