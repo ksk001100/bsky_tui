@@ -661,19 +661,20 @@ impl App {
         if matches!(action, IoEvent::LoadTimeline(_)) {
             self.last_auto_refresh = Instant::now();
         }
-        let context = self.effect_context();
+        let context = self.effect_context(&action);
         self.pending_commands.push(Command::Io {
             event: action,
             context: Box::new(context),
         });
     }
 
-    pub fn effect_context(&self) -> EffectContext {
-        EffectContext {
-            state: self.state.clone(),
-            feature_panel_open: self.feature_panel.is_some(),
-            feature_panel_section: self.feature_panel.as_ref().map(|panel| panel.section),
-        }
+    pub fn effect_context(&self, event: &IoEvent) -> EffectContext {
+        EffectContext::for_event(
+            &self.state,
+            event,
+            self.feature_panel.is_some(),
+            self.feature_panel.as_ref().map(|panel| panel.section),
+        )
     }
 
     pub(in crate::app) fn take_commands(&mut self) -> Vec<Command> {

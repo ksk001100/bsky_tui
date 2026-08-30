@@ -137,7 +137,10 @@ async fn run_ui(
 
 fn apply_effect(app: &mut App, envelope: EffectEnvelope) -> Update {
     let update = app.update(Message::effect(envelope.message));
-    let context = app.effect_context();
+    let context = envelope
+        .context_event
+        .as_ref()
+        .map(|event| app.effect_context(event));
     let _ = envelope.applied.send(context);
     update
 }

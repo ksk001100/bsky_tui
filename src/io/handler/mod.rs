@@ -18,11 +18,13 @@ use crate::{
 pub struct IoAsyncHandler {
     effect_tx: tokio::sync::mpsc::Sender<EffectEnvelope>,
     context: Option<EffectContext>,
+    context_event: Option<IoEvent>,
 }
 
 pub struct EffectEnvelope {
     pub message: EffectMessage,
-    pub applied: tokio::sync::oneshot::Sender<EffectContext>,
+    pub context_event: Option<IoEvent>,
+    pub applied: tokio::sync::oneshot::Sender<Option<EffectContext>>,
 }
 
 impl IoAsyncHandler {
@@ -30,11 +32,13 @@ impl IoAsyncHandler {
         Self {
             effect_tx,
             context: None,
+            context_event: None,
         }
     }
 
     pub async fn handle_io_event(&mut self, io_event: IoEvent, context: EffectContext) {
         self.context = Some(context);
+        self.context_event = Some(io_event.clone());
         let operation = operation_name(&io_event);
         let result = match io_event {
             IoEvent::Initialize => self.initialize().await,
@@ -92,29 +96,43 @@ impl IoAsyncHandler {
                 Some(user_error(operation, &error))
             }
         };
-        self.emit(EffectMessage::Finished { error }).await;
+        self.emit_final(EffectMessage::Finished { error }).await;
     }
 
     async fn emit(&mut self, message: EffectMessage) {
+        let context_event = self
+            .context_event
+            .clone()
+            .expect("context event is set before handling a command");
+        self.emit_with_context(message, Some(context_event)).await;
+    }
+
+    async fn emit_final(&mut self, message: EffectMessage) {
+        self.emit_with_context(message, None).await;
+    }
+
+    async fn emit_with_context(&mut self, message: EffectMessage, context_event: Option<IoEvent>) {
         let (applied, acknowledgement) = tokio::sync::oneshot::channel();
         if self
             .effect_tx
-            .send(EffectEnvelope { message, applied })
+            .send(EffectEnvelope {
+                message,
+                context_event,
+                applied,
+            })
             .await
             .is_ok()
         {
-            if let Ok(context) = acknowledgement.await {
+            if let Ok(Some(context)) = acknowledgement.await {
                 self.context = Some(context);
             }
         }
     }
 
-    fn state(&self) -> &crate::app::state::AppState {
-        &self
-            .context
+    fn state(&self) -> &EffectContext {
+        self.context
             .as_ref()
             .expect("effect context is set before handling a command")
-            .state
     }
 
     async fn agent(&self) -> Result<Arc<BskyAgent>> {

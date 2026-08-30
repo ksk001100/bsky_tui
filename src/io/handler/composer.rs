@@ -4,7 +4,7 @@ use super::*;
 
 impl IoAsyncHandler {
     pub(super) async fn send_post(&mut self) -> Result<()> {
-        let text = self.state().get_input().value().to_string();
+        let text = self.state().input.clone().unwrap_or_default();
         let drafts = drafts_with_default_language(&text)?;
         bsky::send_drafts(self.agent().await?.as_ref(), drafts, None).await?;
         self.finish_composer().await;
@@ -96,7 +96,7 @@ impl IoAsyncHandler {
             .state()
             .get_current_feed()
             .ok_or_else(|| eyre!("no timeline post is selected"))?;
-        let text = self.state().get_input().value().to_string();
+        let text = self.state().input.clone().unwrap_or_default();
         let parent = strong_ref::MainData {
             cid: feed.post.cid.clone(),
             uri: feed.post.uri.clone(),
@@ -149,7 +149,7 @@ impl IoAsyncHandler {
 
     pub(super) async fn search_reply(&mut self) -> Result<()> {
         let (_, post) = self.selected_search_post().await?;
-        let text = self.state().get_input().value().to_string();
+        let text = self.state().input.clone().unwrap_or_default();
         let subject = strong_ref::MainData {
             cid: post.cid.clone(),
             uri: post.uri.clone(),

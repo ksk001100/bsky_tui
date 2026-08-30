@@ -81,8 +81,9 @@ impl IoAsyncHandler {
     pub(super) async fn load_profile_section(&mut self, section: ProfileSection) -> Result<()> {
         let actor = self
             .state()
-            .get_profile()
-            .map(|profile| profile.details.did.clone().into())
+            .profile_did
+            .clone()
+            .map(Into::into)
             .ok_or_else(|| eyre!("no profile is open"))?;
         let content = bsky::profile_content(self.agent().await?.as_ref(), actor, section).await?;
         let moderation = self.state().moderation();

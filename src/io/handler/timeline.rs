@@ -146,7 +146,7 @@ impl IoAsyncHandler {
         self.agent().await?.delete_record(uri).await?;
         let mode = self.state().get_mode();
         let tab = self.state().get_tab();
-        let section = self.state().get_profile().map(|profile| profile.section);
+        let section = self.state().profile_section;
         match mode {
             Mode::Profile => {
                 if let Some(section) = section {
