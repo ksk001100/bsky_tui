@@ -45,3 +45,25 @@ App ──► ui::render
 3. Effect workers receive snapshots and cannot access `Arc<Mutex<App>>`.
 4. Effect results re-enter the same event loop as user input.
 5. New asynchronous features require a `Command` and a typed `EffectMessage`.
+
+## Effect runtime policy
+
+- I/O commands run in FIFO order on one worker. A multi-step command waits for
+  the reducer acknowledgement after each result, so later commands cannot
+  observe an older model snapshot.
+- Commands are not individually spawned or cancelled. Closing the command
+  channel stops the worker after the command currently being handled; dropping
+  the application runtime cancels the worker task.
+- Each completed I/O command logs `queue_wait_ms`, `execution_ms`, and
+  `ack_wait_ms` with operation name and status only. `queue_wait_ms` exposes
+  head-of-line blocking without logging payloads or account data. Add effect
+  lanes only after these measurements demonstrate a user-visible bottleneck;
+  lane work must add request generations and reject stale reducer results.
+
+## Reducer tests
+
+Reducer tests construct an `App`, submit a `Message`, and assert both the model
+and emitted `Command` values without executing I/O. Regression coverage must
+include failure completion, valid empty responses, command payloads, and
+repeated input while an effect is in flight. Handler tests cover API-response
+transformation separately from reducer tests.
