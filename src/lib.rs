@@ -17,13 +17,15 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use ratatui_image::picker::Picker;
 
 use crate::{
-    app::{ui, App, AppReturn},
+    app::{command::Command, message::Message, ui, App, AppReturn, Update},
     inputs::{events::Events, InputEvent},
-    io::IoEvent,
+    io::handler::EffectEnvelope,
 };
 
 pub async fn start_ui(
     app: &Arc<tokio::sync::Mutex<App>>,
+    command_tx: tokio::sync::mpsc::Sender<Command>,
+    effect_rx: tokio::sync::mpsc::Receiver<EffectEnvelope>,
     skip_splash: bool,
     splash: String,
 ) -> Result<()> {
@@ -37,7 +39,15 @@ pub async fn start_ui(
     let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
     app.lock().await.configure_images(picker);
 
-    let result = run_ui(&mut terminal, app, skip_splash, splash).await;
+    let result = run_ui(
+        &mut terminal,
+        app,
+        &command_tx,
+        effect_rx,
+        skip_splash,
+        splash,
+    )
+    .await;
 
     let _ = terminal.clear();
     let _ = terminal.show_cursor();
@@ -49,6 +59,8 @@ pub async fn start_ui(
 async fn run_ui(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     app: &Arc<tokio::sync::Mutex<App>>,
+    command_tx: &tokio::sync::mpsc::Sender<Command>,
+    mut effect_rx: tokio::sync::mpsc::Receiver<EffectEnvelope>,
     skip_splash: bool,
     splash: String,
 ) -> Result<()> {
@@ -56,8 +68,10 @@ async fn run_ui(
     let mut events = Events::new(tick_rate);
 
     {
-        let mut app = app.lock().await;
-        app.dispatch(IoEvent::Initialize).await;
+        let mut model = app.lock().await;
+        let update = model.init();
+        drop(model);
+        execute_commands(app, command_tx, update.commands).await?;
     }
 
     if !skip_splash {
@@ -71,12 +85,21 @@ async fn run_ui(
             })?;
 
             loop {
-                let app = app.lock().await;
-                if app.state.get_timeline().is_some() || app.error().is_some() {
+                let initialized = {
+                    let app = app.lock().await;
+                    app.state.get_timeline().is_some() || app.error().is_some()
+                };
+                if initialized {
                     break;
                 }
-                drop(app);
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::select! {
+                    envelope = effect_rx.recv() => {
+                        let envelope = envelope.ok_or_else(|| eyre::eyre!("effect runtime is unavailable"))?;
+                        let update = apply_effect(app, envelope).await;
+                        execute_commands(app, command_tx, update.commands).await?;
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
             }
 
             if app.lock().await.error().is_some() {
@@ -89,23 +112,85 @@ async fn run_ui(
     }
 
     loop {
-        let mut app = app.lock().await;
+        {
+            let mut app = app.lock().await;
+            terminal
+                .draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, &mut app))?;
+        }
 
-        terminal.draw(|rect| ui::render::<CrosstermBackend<std::io::Stdout>>(rect, &mut app))?;
-
-        let result = match events.next().await {
-            InputEvent::Input(key) => app.do_action(key).await,
-            InputEvent::Mouse(mouse) => app.do_mouse_action(mouse).await,
-            InputEvent::Resize(_, _) => AppReturn::Continue,
-            InputEvent::Tick => app.update_on_tick().await,
+        let update = tokio::select! {
+            input = events.next() => {
+                let mut app = app.lock().await;
+                match input {
+                    InputEvent::Input(key) => app.update(Message::KeyPressed(key)),
+                    InputEvent::Mouse(mouse) => app.update(Message::Mouse(mouse)),
+                    InputEvent::Resize(_, _) => Update {
+                        control: AppReturn::Continue,
+                        commands: Vec::new(),
+                    },
+                    InputEvent::Tick => app.update(Message::Tick),
+                }
+            }
+            envelope = effect_rx.recv() => {
+                let envelope = envelope.ok_or_else(|| eyre::eyre!("effect runtime is unavailable"))?;
+                apply_effect(app, envelope).await
+            }
         };
+        execute_commands(app, command_tx, update.commands).await?;
 
-        if result == AppReturn::Exit {
+        if update.control == AppReturn::Exit {
             events.close();
             break;
         }
     }
 
+    Ok(())
+}
+
+async fn apply_effect(app: &Arc<tokio::sync::Mutex<App>>, envelope: EffectEnvelope) -> Update {
+    let (update, context) = {
+        let mut app = app.lock().await;
+        let update = app.update(Message::effect(envelope.message));
+        let context = app.effect_context();
+        (update, context)
+    };
+    let _ = envelope.applied.send(context);
+    update
+}
+
+async fn execute_commands(
+    app: &Arc<tokio::sync::Mutex<App>>,
+    command_tx: &tokio::sync::mpsc::Sender<Command>,
+    commands: Vec<Command>,
+) -> Result<()> {
+    for command in commands {
+        match command {
+            Command::LoadImages(urls) => app.lock().await.queue_images(urls),
+            Command::PollImages => app.lock().await.poll_images(),
+            Command::OpenUrl { url, error_context } => {
+                if let Err(error) = webbrowser::open(&url) {
+                    let message = format!("{error_context}: {error}");
+                    let update = app.lock().await.update(Message::effect(
+                        crate::app::message::EffectMessage::RuntimeError(message),
+                    ));
+                    debug_assert!(update.commands.is_empty());
+                }
+            }
+            Command::CopyToClipboard { value, label } => {
+                if let Err(error) = crate::app::copy_osc52(&value) {
+                    let message = format!("Could not copy {label}: {error}");
+                    let update = app.lock().await.update(Message::effect(
+                        crate::app::message::EffectMessage::RuntimeError(message),
+                    ));
+                    debug_assert!(update.commands.is_empty());
+                }
+            }
+            command @ Command::Io { .. } => command_tx
+                .send(command)
+                .await
+                .map_err(|_| eyre::eyre!("background worker is unavailable"))?,
+        }
+    }
     Ok(())
 }
 

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use seahorse::{App as SeahorseApp, Command, Context};
 
 use bsky_tui::{
-    app::{auth::AuthCredentials, config::AppConfig, App},
-    io::{handler::IoAsyncHandler, IoEvent},
+    app::{auth::AuthCredentials, command::Command as AppCommand, config::AppConfig, App},
+    io::handler::{EffectEnvelope, IoAsyncHandler},
     start_ui,
     utils::get_splash,
 };
@@ -42,19 +42,33 @@ async fn action(_c: &Context) {
         return;
     }
 
-    let (sync_io_tx, mut sync_io_rx) = tokio::sync::mpsc::channel::<IoEvent>(100);
+    let (command_tx, mut command_rx) = tokio::sync::mpsc::channel::<AppCommand>(100);
+    let (effect_tx, effect_rx) = tokio::sync::mpsc::channel::<EffectEnvelope>(100);
 
-    let app = Arc::new(tokio::sync::Mutex::new(App::new(sync_io_tx.clone())));
+    let app = Arc::new(tokio::sync::Mutex::new(App::new()));
     let app_ui = Arc::clone(&app);
 
     tokio::spawn(async move {
-        let mut handler = IoAsyncHandler::new(app);
-        while let Some(io_event) = sync_io_rx.recv().await {
-            handler.handle_io_event(io_event).await;
+        let mut handler = IoAsyncHandler::new(effect_tx);
+        while let Some(command) = command_rx.recv().await {
+            match command {
+                AppCommand::Io { event, context } => handler.handle_io_event(event, *context).await,
+                AppCommand::LoadImages(_)
+                | AppCommand::PollImages
+                | AppCommand::OpenUrl { .. }
+                | AppCommand::CopyToClipboard { .. } => {}
+            }
         }
     });
 
-    if let Err(error) = start_ui(&app_ui, config.skip_splash, get_splash(config.splash_path)).await
+    if let Err(error) = start_ui(
+        &app_ui,
+        command_tx,
+        effect_rx,
+        config.skip_splash,
+        get_splash(config.splash_path),
+    )
+    .await
     {
         eprintln!("Application error: {error:#}");
     }
