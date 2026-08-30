@@ -173,19 +173,19 @@ impl App {
 
     pub(crate) fn key_hints(&self) -> &'static str {
         if self.error.is_some() {
-            return "Esc dismiss   q quit";
+            return "q/Esc dismiss   Ctrl+C quit";
         }
         if self.pending_confirmation.is_some() || self.pending_delete.is_some() {
-            return "y/Enter confirm   Esc cancel";
+            return "y/Enter confirm   q/n/Esc cancel";
         }
         if self.composer_preview.is_some() {
             return "any key close preview";
         }
         if self.notification_settings.is_some() {
-            return "↑/↓ category   Space list   p push   i audience   v activity   Esc close";
+            return "↑/↓ category   Space list   p push   i audience   v activity   q/Esc close";
         }
         if self.action_menu.is_some() {
-            return "↑/↓ select   Enter run   Esc close";
+            return "↑/↓ select   Enter run   q/Esc close";
         }
         if let Some(panel) = self.feature_panel.as_ref() {
             if panel.prompt.is_some() {
@@ -194,19 +194,19 @@ impl App {
             return "1 Lists  2 Packs  3 Discover  4 DM  5 Safety  6 Settings   ? help";
         }
         if self.state.is_help_mode() {
-            return "↑/↓ move   PgUp/PgDn jump   Esc close";
+            return "↑/↓ move   PgUp/PgDn jump   q/Esc close";
         }
         if self.state.is_feed_search_mode() {
             return "Enter search   Esc cancel";
         }
         if self.feed_viewer.is_some() {
-            return "↑/↓ select   Enter choose   / search   s save   Esc close";
+            return "↑/↓ select   Enter choose   / search   s save   q/Esc close";
         }
         if self.image_viewer.is_some() {
-            return "←/→ image   Esc close";
+            return "←/→ image   q/Esc close";
         }
         if self.facet_viewer.is_some() || self.interaction_viewer.is_some() {
-            return "↑/↓ select   Enter open   Esc close";
+            return "↑/↓ select   Enter open   q/Esc close";
         }
         match self.state.get_mode() {
             state::Mode::Post | state::Mode::Reply => {
@@ -214,10 +214,10 @@ impl App {
             }
             state::Mode::Search | state::Mode::UserSearch => "Enter search   Esc cancel",
             state::Mode::Profile => {
-                "↑/↓ select   ←/→ section   Enter open   i image   Esc back   ? help"
+                "↑/↓ select   ←/→ section   Enter open   i image   q/Esc back   ? help"
             }
             state::Mode::Thread => {
-                "↑/↓ select   H hide reply   M mute thread   Ctrl+D detach quote   Esc back"
+                "↑/↓ select   H hide reply   M mute thread   Ctrl+D detach quote   q/Esc back"
             }
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => "↑/↓ select   Enter thread   n post   r reply   Tab switch   ? help",
@@ -228,48 +228,49 @@ impl App {
                     "↑/↓ select   Enter thread   i image   / search   Tab switch   ? help"
                 }
             },
-            state::Mode::Help => "↑/↓ move   PgUp/PgDn jump   Esc close",
+            state::Mode::Help => "↑/↓ move   PgUp/PgDn jump   q/Esc close",
             state::Mode::FeedSearch => "Enter search   Esc cancel",
         }
     }
 
     pub async fn do_action(&mut self, key: Key) -> AppReturn {
+        // Ctrl+C is the only unconditional application exit. q acts like Esc
+        // outside text entry, closing the current layer or going back.
+        if key == Key::Ctrl('c') {
+            return AppReturn::Exit;
+        }
+
         if self.is_loading {
-            return match key {
-                Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
-                _ => AppReturn::Continue,
-            };
+            return AppReturn::Continue;
         }
 
         if !self.state.is_initialized() {
             return match key {
-                Key::Char('q') | Key::Esc | Key::Ctrl('c') => AppReturn::Exit,
                 Key::Char('r') => {
                     self.error = None;
                     self.dispatch(IoEvent::Initialize).await;
+                    AppReturn::Continue
+                }
+                Key::Char('q') | Key::Esc => {
+                    self.error = None;
                     AppReturn::Continue
                 }
                 _ => AppReturn::Continue,
             };
         }
 
-        // Ctrl+C is the unconditional emergency exit. Esc is reserved for
-        // cancelling or closing the current layer.
-        if key == Key::Ctrl('c') {
-            return AppReturn::Exit;
-        }
-        if key == Key::Char('q')
-            && !matches!(
-                self.state.get_mode(),
-                state::Mode::Post
-                    | state::Mode::Reply
-                    | state::Mode::Search
-                    | state::Mode::UserSearch
-                    | state::Mode::FeedSearch
-            )
-        {
-            return AppReturn::Exit;
-        }
+        let text_entry_active = matches!(
+            self.state.get_mode(),
+            state::Mode::Post
+                | state::Mode::Reply
+                | state::Mode::Search
+                | state::Mode::UserSearch
+                | state::Mode::FeedSearch
+        ) || self
+            .feature_panel
+            .as_ref()
+            .is_some_and(|panel| panel.prompt.is_some());
+        let key = close_or_back_key(key, text_entry_active);
 
         if self.error.is_some() {
             if key == Key::Esc {
@@ -2490,6 +2491,14 @@ fn interaction_kind(key: Key) -> InteractionKind {
     }
 }
 
+fn close_or_back_key(key: Key, text_entry_active: bool) -> Key {
+    if key == Key::Char('q') && !text_entry_active {
+        Key::Esc
+    } else {
+        key
+    }
+}
+
 fn action_items(tab: Tab) -> Vec<(&'static str, Key)> {
     let mut items = vec![
         ("Reload", Key::F5),
@@ -2650,5 +2659,11 @@ mod tests {
     fn osc52_base64_supports_unicode_clipboard_content() {
         assert_eq!(base64_encode("日本".as_bytes()), "5pel5pys");
         assert!(binding_matches("page_down", Key::PageDown));
+    }
+
+    #[test]
+    fn q_is_close_or_back_except_during_text_entry() {
+        assert_eq!(close_or_back_key(Key::Char('q'), false), Key::Esc);
+        assert_eq!(close_or_back_key(Key::Char('q'), true), Key::Char('q'));
     }
 }

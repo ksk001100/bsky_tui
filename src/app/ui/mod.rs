@@ -221,7 +221,7 @@ where
                 Block::default()
                     .borders(Borders::ALL)
                     .title(format!(" {} ", panel.title))
-                    .title_bottom(" n new  a add  e edit  x delete  s save/subscribe  f feed  w write  Esc back "),
+                    .title_bottom(" n new  a add  e edit  x delete  s save/subscribe  f feed  w write  q/Esc back "),
             )
             .highlight_style(Style::default().bg(accent).fg(Color::White));
         let mut state =

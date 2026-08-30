@@ -22,3 +22,12 @@ async fn ctrl_c_exits_even_before_initialization() {
     let mut app = App::new(tx);
     assert_eq!(app.do_action(Key::Ctrl('c')).await, AppReturn::Exit);
 }
+
+#[tokio::test]
+async fn q_and_escape_do_not_exit_before_initialization() {
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    let mut app = App::new(tx);
+
+    assert_eq!(app.do_action(Key::Char('q')).await, AppReturn::Continue);
+    assert_eq!(app.do_action(Key::Esc).await, AppReturn::Continue);
+}

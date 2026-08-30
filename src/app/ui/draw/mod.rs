@@ -100,7 +100,7 @@ pub fn notification_settings(
     }
     List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default().borders(Borders::ALL).title(
-            " Notification settings — Space list / p push / i audience / v activity / Esc close ",
+            " Notification settings — Space list / p push / i audience / v activity / q/Esc close ",
         ),
     )
 }
@@ -152,21 +152,23 @@ pub fn loading<'a>() -> Paragraph<'a> {
 }
 
 pub fn error<'a>(message: &str) -> Paragraph<'a> {
-    Paragraph::new(format!("{message}\n\nPress Esc to dismiss, or q to quit."))
-        .style(Style::default().fg(Color::LightRed).bg(Color::Black))
-        .alignment(Alignment::Left)
-        .wrap(ratatui::widgets::Wrap { trim: true })
-        .block(
-            Block::default()
-                .title("Error")
-                .borders(Borders::ALL)
-                .padding(Padding::new(1, 1, 1, 1)),
-        )
+    Paragraph::new(format!(
+        "{message}\n\nPress q or Esc to dismiss. Press Ctrl+C to quit."
+    ))
+    .style(Style::default().fg(Color::LightRed).bg(Color::Black))
+    .alignment(Alignment::Left)
+    .wrap(ratatui::widgets::Wrap { trim: true })
+    .block(
+        Block::default()
+            .title("Error")
+            .borders(Borders::ALL)
+            .padding(Padding::new(1, 1, 1, 1)),
+    )
 }
 
 pub fn confirmation(message: String) -> Paragraph<'static> {
     Paragraph::new(format!(
-        "{message}\n\nPress y/Enter to confirm, n/Esc to cancel."
+        "{message}\n\nPress y/Enter to confirm, q/n/Esc to cancel."
     ))
     .wrap(ratatui::widgets::Wrap { trim: true })
     .block(
@@ -216,7 +218,7 @@ pub fn facets(facets: Vec<bsky::PostFacet>) -> List<'static> {
         .collect::<Vec<_>>();
     List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default()
-            .title(" Links — ↑/↓ select, Enter open, Esc close ")
+            .title(" Links — ↑/↓ select, Enter open, q/Esc close ")
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1)),
     )
@@ -241,7 +243,7 @@ pub fn interactions(kind: InteractionKind, items: Vec<bsky::InteractionItem>) ->
     };
     List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default()
-            .title(format!("{title}— ↑/↓ select, Enter open, Esc close "))
+            .title(format!("{title}— ↑/↓ select, Enter open, q/Esc close "))
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1)),
     )
@@ -271,7 +273,7 @@ pub fn feed_picker(items: Vec<FeedDescriptor>) -> List<'static> {
     };
     List::new(rows).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default()
-            .title(" Feeds — Enter select, / search, s save/unsave, Esc close ")
+            .title(" Feeds — Enter select, / search, s save/unsave, q/Esc close ")
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1)),
     )
@@ -403,7 +405,7 @@ pub fn profile_items(profile: &ProfileState) -> List<'static> {
     };
     List::new(items).highlight_style(FOCUSED_POST_STYLE).block(
         Block::default().borders(Borders::ALL).title(format!(
-            " {} — ↑/↓ select, Enter open, Esc back ",
+            " {} — ↑/↓ select, Enter open, q/Esc back ",
             profile.section.label()
         )),
     )
@@ -411,9 +413,8 @@ pub fn profile_items(profile: &ProfileState) -> List<'static> {
 
 const HELP_ROWS: &[(&str, &str, &str)] = &[
     ("Browse screens", "? / F1", "Open or close help"),
-    ("", "Esc", "Cancel, close, or go back"),
-    ("", "q", "Quit from any browsing screen"),
-    ("", "Ctrl+C", "Quit immediately"),
+    ("", "q / Esc", "Cancel, close, or go back"),
+    ("", "Ctrl+C", "Quit the application"),
     ("Main tabs", "Tab", "Switch Home → Notifications → Search"),
     ("", "↑/↓ or j/k", "Move selection"),
     ("", "←/→ or h/l", "Previous or next page"),
@@ -497,7 +498,7 @@ pub fn help<'a>() -> Table<'a> {
     .highlight_symbol("▸ ")
     .block(
         Block::default()
-            .title(" Keyboard help — ↑/↓ move, PgUp/PgDn jump, Esc close ")
+            .title(" Keyboard help — ↑/↓ move, PgUp/PgDn jump, q/Esc close ")
             .borders(Borders::ALL)
             .style(Style::default().fg(Color::White).bg(Color::Black))
             .border_type(BorderType::Plain),
@@ -639,7 +640,7 @@ pub fn thread(state: &AppState, width: u16) -> List<'static> {
         Block::default()
             .borders(Borders::ALL)
             .padding(Padding::new(1, 1, 1, 1))
-            .title("Thread — j/k move, b browser, e embed, f facets, Esc close"),
+            .title("Thread — j/k move, b browser, e embed, f facets, q/Esc close"),
     )
 }
 

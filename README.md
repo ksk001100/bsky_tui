@@ -145,9 +145,8 @@ text-cell rendering mode.
 ## Keybindings
 
 ### Common
-- `Esc`: Cancel, close, or go back (it does not quit from a main tab)
-- `q`: Exit from any browsing screen
-- `Ctrl+c`: Exit immediately
+- `q`, `Esc`: Cancel, close, or go back (they do not quit from a main tab)
+- `Ctrl+c`: Exit the application
 - `Tab`: Switch tabs (Home → Notifications → Search → Home)
 - `?`, `F1`: Show help (also available in threads and profiles)
 - `u`: Search for users
@@ -235,7 +234,7 @@ text-cell rendering mode.
 - `H`: Hide or unhide the selected reply when the thread is yours
 - `M`: Mute or unmute the thread
 - `Ctrl+d`: Detach a selected quote of your own post
-- `Esc`: Close the thread
+- `q`, `Esc`: Close the thread
 
 ### Profile Viewer
 - `h`, `Left`: Previous profile section
@@ -250,13 +249,13 @@ text-cell rendering mode.
 - `t`: Open the selected post thread
 - `i`, `Space`: Open attached images when the selected item is a post
 - `Enter`, `o`: Open the selected post, feed, list, or starter pack
-- `Esc`: Close the profile
+- `q`, `Esc`: Close the profile
 
 ### Facet and Interaction Lists
 - `j`, `Down`: Move down
 - `k`, `Up`: Move up
 - `Enter`, `o`: Open the selected item in browser
-- `Esc`: Close the list
+- `q`, `Esc`: Close the list
 
 ### Feed Selector
 - `j`, `Down`: Move down
@@ -265,7 +264,7 @@ text-cell rendering mode.
 - `/`: Search custom feeds
 - `s`: Save or unsave a custom feed
 - `!`: Report a custom feed with a selected reason
-- `Esc`: Close the selector
+- `q`, `Esc`: Close the selector
 
 ### Lists, Starter Packs, Direct Messages, Moderation, and Settings
 
@@ -280,12 +279,12 @@ text-cell rendering mode.
 - `Space`: Mute or unmute a conversation
 - `b`, `r`: Block or report a DM participant/content
 - `L`, `l`: Add or toggle a labeler subscription
-- `Esc`: Close the editor, go to the parent view, or close the panel
+- `q`, `Esc`: Go to the parent view or close the panel (`Esc` alone closes an active editor)
 
 ### Image Viewer
 - `h`, `Left`: Previous image
 - `l`, `Right`: Next image
-- `Esc`: Close image viewer
+- `q`, `Esc`: Close image viewer
 
 ### Post/Reply Mode
 - `Esc`: Cancel

@@ -69,9 +69,9 @@ pub enum Key {
 }
 
 impl Key {
-    /// If exit
+    /// Whether this key unconditionally exits the application.
     pub fn is_exit(&self) -> bool {
-        matches!(self, Key::Ctrl('c') | Key::Char('q') | Key::Esc)
+        matches!(self, Key::Ctrl('c'))
     }
 
     /// Returns the function key corresponding to the given number
