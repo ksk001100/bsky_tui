@@ -147,7 +147,7 @@ text-cell rendering mode.
 ### Common
 - `q`, `Esc`: Cancel, close, or go back (they do not quit from a main tab)
 - `Ctrl+c`: Exit the application
-- `Tab`: Switch tabs (Home → Notifications → Search → Home)
+- `Tab`: Switch tabs (Home → Notifications → Messages → Explore → Home)
 - `?`, `F1`: Show help (also available in threads and profiles)
 - `u`: Search for users
 - `a`: Open the selected post author profile (where available)
@@ -155,7 +155,7 @@ text-cell rendering mode.
 - `D`: Delete the selected post when it belongs to you (with confirmation)
 - `X`: Quote the selected post
 - `g`: Open Lists and Starter Packs
-- `d`: Open Direct Messages
+- `d`: Jump directly to the Messages tab
 - `;`: Open Moderation & Safety
 - `,`: Open Settings & Accounts
 - `:`: Open the action menu
@@ -197,13 +197,34 @@ text-cell rendering mode.
 - `f`: Follow/unfollow the selected sender
 - `L`: Like the selected sender's latest post (does nothing if already liked)
 - `a`: Open the selected sender's profile
+- `Enter`: Open the related post thread inside the TUI
+- `o`: Open the related post in the browser
 - `h`, `Left`: Previous page
 - `l`, `Right`: Next page
 - `[`: Previous API page
 - `]`: Next API page
 - `/`: Switch to search mode
 
-### Search Tab
+Notifications hydrate their related posts and show the author, post text, relative time,
+embed summary, attached images or link/video thumbnails, and interaction counts directly
+in the list. Sensitive-media visibility follows the same moderation rules as the timeline.
+
+### Messages Tab
+- `j`, `Down`, `Ctrl+n`: Move down
+- `k`, `Up`, `Ctrl+p`: Move up
+- `Enter`, `o`: Open the selected conversation
+- `n`: Start a conversation by handle or DID
+- `w`: Write a text message (1,000 characters maximum)
+- `Space`: Mute or unmute the selected conversation
+- `r`: Report the selected conversation or message
+- `b`: Block the selected participant
+- `F5`: Reload conversations or the open conversation
+- `q`, `Esc`: Return from a conversation to the conversation list
+
+### Explore Tab
+- Before searching, the tab shows suggested topics and accounts
+- `Enter`, `o`: Search a suggested topic or open a suggested profile
+- `Esc`: Return from search results to Explore
 - `j`, `Down`, `Ctrl+n`: Scroll down
 - `k`, `Up`, `Ctrl+p`: Scroll up
 - `h`, `Left`: Previous page

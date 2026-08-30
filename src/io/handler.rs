@@ -455,6 +455,11 @@ impl IoAsyncHandler {
                 let tab = self.app.lock().await.state.get_tab();
                 if tab == Tab::Search {
                     self.do_search(SearchEvent::Reload).await?;
+                } else if tab == Tab::Messages {
+                    self.load_feature_section(
+                        crate::app::feature_panel::FeatureSection::DirectMessages,
+                    )
+                    .await?;
                 } else {
                     self.do_load_timeline(TimelineEvent::Reload).await?;
                 }
@@ -499,6 +504,18 @@ impl IoAsyncHandler {
         }
         let agent = self.agent().await?;
         let notifications = bsky::notifications(agent.as_ref(), cursor.clone()).await?;
+        let hydrated_posts = bsky::notification_posts(agent.as_ref(), &notifications.notifications)
+            .await
+            .unwrap_or_default();
+        let moderation = self.app.lock().await.state.moderation();
+        let image_urls = hydrated_posts
+            .iter()
+            .flat_map(|post| bsky::post_image_urls(post, &moderation))
+            .collect::<Vec<_>>();
+        let notification_posts = hydrated_posts
+            .into_iter()
+            .map(|post| (post.uri.clone(), post.data.clone()))
+            .collect();
         bsky::update_seen(agent.as_ref()).await?;
         let page_cursors = updated_cursors(
             if matches!(event, NotificationEvent::Load) {
@@ -513,6 +530,8 @@ impl IoAsyncHandler {
         let mut app = self.app.lock().await;
         app.state
             .set_notifications(Some(notifications.notifications.clone()));
+        app.state.set_notification_posts(notification_posts);
+        app.queue_images(image_urls);
         app.state.set_notification_cursors(page_cursors);
         app.state.set_notifications_current_cursor_index(target);
         Ok(())
@@ -1208,10 +1227,14 @@ impl IoAsyncHandler {
                 rows
             }
         };
-        self.app
-            .lock()
-            .await
-            .set_feature_rows(section.title().to_owned(), rows, false);
+        let mut app = self.app.lock().await;
+        if section == FeatureSection::DirectMessages {
+            app.set_message_rows(section.title().to_owned(), rows);
+        } else if section == FeatureSection::Discovery && app.state.get_tab() == Tab::Search {
+            app.set_explore_rows(rows);
+        } else {
+            app.set_feature_rows(section.title().to_owned(), rows, false);
+        }
         Ok(())
     }
 
@@ -1219,16 +1242,15 @@ impl IoAsyncHandler {
         let rows =
             bsky::feature_services::conversation(self.agent().await?.as_ref(), convo_id.clone())
                 .await?;
-        let child = self
-            .app
-            .lock()
-            .await
-            .feature_panel()
-            .is_some_and(|panel| !panel.title.starts_with("Conversation ·"));
-        self.app
-            .lock()
-            .await
-            .set_feature_rows(format!("Conversation · {convo_id}"), rows, child);
+        let mut app = self.app.lock().await;
+        if app.state.get_tab() == Tab::Messages {
+            app.open_message_conversation(format!("Conversation · {convo_id}"), rows);
+        } else {
+            let child = app
+                .feature_panel()
+                .is_some_and(|panel| !panel.title.starts_with("Conversation ·"));
+            app.set_feature_rows(format!("Conversation · {convo_id}"), rows, child);
+        }
         Ok(())
     }
 }

@@ -55,6 +55,7 @@ impl fmt::Display for Mode {
 pub enum Tab {
     Home,
     Notifications,
+    Messages,
     Search,
 }
 
@@ -63,7 +64,8 @@ impl fmt::Display for Tab {
         let str = match self {
             Tab::Home => "Home",
             Tab::Notifications => "Notifications",
-            Tab::Search => "Search",
+            Tab::Messages => "Messages",
+            Tab::Search => "Explore",
         };
         write!(f, "{}", str)
     }
@@ -87,6 +89,7 @@ pub enum AppState {
         notifications_current_cursor_index: usize,
         notification_cursors: Vec<Option<String>>,
         notification_filters: NotificationFilters,
+        notification_posts: HashMap<String, PostViewData>,
         search_list_state: ListState,
         search_list_position: usize,
         handle: Handle,
@@ -129,6 +132,7 @@ impl AppState {
             notifications_current_cursor_index: 0,
             notification_cursors: vec![None],
             notification_filters: NotificationFilters::default(),
+            notification_posts: HashMap::new(),
             search_list_state: ListState::default().with_selected(Some(0)),
             search_list_position: 0,
             handle,
@@ -1002,9 +1006,30 @@ impl AppState {
         if let Self::Initialized { tab, .. } = self {
             *tab = match tab {
                 Tab::Home => Tab::Notifications,
-                Tab::Notifications => Tab::Search,
+                Tab::Notifications => Tab::Messages,
+                Tab::Messages => Tab::Search,
                 Tab::Search => Tab::Home,
             }
+        }
+    }
+
+    pub fn set_notification_posts(&mut self, posts: HashMap<String, PostViewData>) {
+        if let Self::Initialized {
+            notification_posts, ..
+        } = self
+        {
+            *notification_posts = posts;
+        }
+    }
+
+    pub fn notification_post(&self, uri: &str) -> Option<PostViewData> {
+        if let Self::Initialized {
+            notification_posts, ..
+        } = self
+        {
+            notification_posts.get(uri).cloned()
+        } else {
+            None
         }
     }
 
@@ -1047,6 +1072,12 @@ impl AppState {
         } else {
             None
         }
+    }
+
+    pub fn get_current_notification_post(&self) -> Option<PostViewData> {
+        let notification = self.get_current_notification()?;
+        let uri = notifications::post_uri(&notification)?;
+        self.notification_post(uri)
     }
 
     pub fn notification_filters(&self) -> NotificationFilters {

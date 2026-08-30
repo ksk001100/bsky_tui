@@ -58,22 +58,33 @@ where
                 render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
             }
             Tab::Notifications => {
-                let body = draw::notifications(app.state(), accent);
-                app.state
-                    .get_notifications_list_state()
-                    .select(Some(app.state.get_notifications_list_position()));
-                f.render_stateful_widget(
-                    body,
-                    body_chunks[1],
-                    &mut app.state.get_notifications_list_state(),
-                );
-            }
-            Tab::Search => {
-                let posts = draw::search_results(app.state(), body_chunks[1].width, accent);
-                let mut list_state = app.state.get_search_list_state();
-                list_state.select(Some(app.state.get_search_list_position()));
+                let posts = draw::notifications(app.state(), body_chunks[1].width, accent);
+                let mut list_state = app.state.get_notifications_list_state();
+                list_state.select(Some(app.state.get_notifications_list_position()));
                 f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
                 render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
+            }
+            Tab::Messages => {
+                let panel = app.messages();
+                let body = draw::messages(panel, accent);
+                let mut list_state = ListState::default()
+                    .with_selected((!panel.rows.is_empty()).then_some(panel.selected));
+                f.render_stateful_widget(body, body_chunks[1], &mut list_state);
+            }
+            Tab::Search => {
+                if app.state.get_search_query().is_some() {
+                    let posts = draw::search_results(app.state(), body_chunks[1].width, accent);
+                    let mut list_state = app.state.get_search_list_state();
+                    list_state.select(Some(app.state.get_search_list_position()));
+                    f.render_stateful_widget(posts.widget, body_chunks[1], &mut list_state);
+                    render_post_images(f, app, &posts.layouts, body_chunks[1], list_state.offset());
+                } else {
+                    let panel = app.explore();
+                    let body = draw::explore(panel, accent);
+                    let mut list_state = ListState::default()
+                        .with_selected((!panel.rows.is_empty()).then_some(panel.selected));
+                    f.render_stateful_widget(body, body_chunks[1], &mut list_state);
+                }
             }
         };
     }
@@ -243,6 +254,30 @@ where
         f.render_stateful_widget(widget, area, &mut state);
 
         if let Some(prompt) = panel.prompt.as_ref() {
+            let prompt_area = layout::popup(78, 28, size);
+            let text = format!("{}\n\n{}", prompt.help, prompt.input.value());
+            f.render_widget(Clear, prompt_area);
+            f.render_widget(
+                Paragraph::new(text)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .border_style(theme::border(accent))
+                            .title(format!(" {} ", prompt.label)),
+                    )
+                    .wrap(Wrap { trim: false }),
+                prompt_area,
+            );
+            f.set_cursor_position(Position::new(
+                prompt_area.x + 1 + prompt.input.visual_cursor() as u16,
+                prompt_area.y + 4,
+            ));
+        }
+    }
+
+    if app.state.get_tab() == Tab::Messages {
+        if let Some(prompt) = app.messages().prompt.as_ref() {
             let prompt_area = layout::popup(78, 28, size);
             let text = format!("{}\n\n{}", prompt.help, prompt.input.value());
             f.render_widget(Clear, prompt_area);

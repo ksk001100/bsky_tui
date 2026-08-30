@@ -1,4 +1,5 @@
-use atrium_api::app::bsky::feed::{defs::PostViewData, like, post, repost};
+use atrium_api::app::bsky::feed::{defs::PostViewData, post};
+use atrium_api::types::Unknown;
 use bsky_sdk::api::types::TryFromUnknown;
 use chrono::{DateTime, Utc};
 use ratatui::{
@@ -438,7 +439,11 @@ const HELP_ROWS: &[(&str, &str, &str)] = &[
     ("Browse screens", "? / F1", "Open or close help"),
     ("", "q / Esc", "Cancel, close, or go back"),
     ("", "Ctrl+C", "Quit the application"),
-    ("Main tabs", "Tab", "Switch Home → Notifications → Search"),
+    (
+        "Main tabs",
+        "Tab",
+        "Switch Home → Notifications → Messages → Explore",
+    ),
     ("", "↑/↓ or j/k", "Move selection"),
     ("", "←/→ or h/l", "Previous or next page"),
     ("", "[/] or PgUp/PgDn", "Previous or next page"),
@@ -453,6 +458,15 @@ const HELP_ROWS: &[(&str, &str, &str)] = &[
     ("", "Enter / o", "Open the related post"),
     ("", "a / f / L", "Profile / follow / like latest post"),
     ("", "p", "Open notification settings"),
+    ("Messages", "Enter / o", "Open the selected conversation"),
+    ("", "n / w", "Start a conversation / write a message"),
+    ("", "Space", "Mute or unmute the selected conversation"),
+    (
+        "Explore",
+        "Enter / o",
+        "Search a topic or open a suggested profile",
+    ),
+    ("", "/ / u", "Search posts / search users"),
     (
         "Notification settings",
         "↑/↓ or j/k",
@@ -540,6 +554,7 @@ pub struct PostList<'a> {
 pub struct PostLayout {
     pub height: u16,
     pub avatar_url: Option<String>,
+    pub avatar_row: u16,
     pub attachment_urls: Vec<String>,
     pub avatar_width: u16,
     pub content_width: u16,
@@ -721,12 +736,11 @@ fn render_post(
     };
     let indent = avatar_width + u16::from(avatar_width > 0) * 2;
     let content_width = inner_width.saturating_sub(indent).max(1);
-    let (mut text, created_at) =
-        if let Ok(record) = post::Record::try_from_unknown(post.record.clone()) {
-            (record.text.clone(), format!("{:?}+0000", record.created_at))
-        } else {
-            (String::new(), String::new())
-        };
+    let (mut text, created_at) = if let Some(record) = safe_post_record(&post.record) {
+        (record.text.clone(), format!("{:?}+0000", record.created_at))
+    } else {
+        (String::new(), String::new())
+    };
     let duration = DateTime::parse_from_str(&created_at, "%Y-%m-%dT%H:%M:%S%z")
         .map(|date| utils::get_duration_string(date, Utc::now().fixed_offset()))
         .unwrap_or_default();
@@ -837,6 +851,7 @@ fn render_post(
             .permits_media()
             .then(|| post.author.avatar.clone())
             .flatten(),
+        avatar_row: 0,
         attachment_urls,
         avatar_width,
         content_width,
@@ -865,7 +880,12 @@ pub fn image_placements(
         }
 
         if let Some(url) = &layout.avatar_url {
-            let area = Rect::new(inner.x, y, layout.avatar_width, AVATAR_HEIGHT);
+            let area = Rect::new(
+                inner.x,
+                y.saturating_add(layout.avatar_row),
+                layout.avatar_width,
+                AVATAR_HEIGHT,
+            );
             if layout.avatar_width > 0 && area.bottom() <= inner.bottom() {
                 placements.push(ImagePlacement {
                     url: url.clone(),
@@ -958,155 +978,161 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     output
 }
 
-pub fn notifications<'a>(state: &AppState, accent: Color) -> List<'a> {
+fn safe_post_record(value: &Unknown) -> Option<post::Record> {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+pub fn notifications(state: &AppState, width: u16, accent: Color) -> PostList<'static> {
     let notifications = state.notification_groups();
-    let my_handle = state.get_handle();
+    let inner_width = width.saturating_sub(4);
+    let content_width = inner_width.saturating_sub(4).max(1) as usize;
+    let moderation = state.moderation();
 
-    let list_items: Vec<ListItem> = if notifications.is_empty() {
-        vec![]
-    } else {
-        notifications
-            .iter()
-            .map(|group| {
-                let notification = group.primary();
-                let handle = notification.author.handle.to_string();
-                let display_name = notification
-                    .author
-                    .display_name
-                    .clone()
-                    .unwrap_or_else(|| "".into());
-                let reason = notification.reason.as_str();
-                let datetime = notification.indexed_at.as_str();
-                let reason_icon = match reason {
-                    "reply" => Span::styled("↩", Style::default().fg(Color::Gray)),
-                    "repost" => Span::styled("🔁", Style::default().fg(Color::Green)),
-                    "like" => Span::styled("❤", Style::default().fg(Color::Red)),
-                    "follow" => Span::styled("➕", Style::default().fg(Color::LightBlue)),
-                    "mention" => Span::styled("🔔", Style::default().fg(Color::Yellow)),
-                    "quote" => Span::styled("📣", Style::default().fg(Color::Magenta)),
-                    "subscribed-post" => Span::styled("★", Style::default().fg(Color::Cyan)),
-                    "like-via-repost" | "repost-via-repost" => {
-                        Span::styled("↗", Style::default().fg(Color::Green))
+    let rendered = notifications
+        .iter()
+        .map(|group| {
+            let notification = group.primary();
+            let handle = notification.author.handle.to_string();
+            let display_name = notification
+                .author
+                .display_name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .unwrap_or_else(|| format!("@{handle}"));
+            let reason = notification.reason.as_str();
+            let datetime = notification.indexed_at.as_str();
+            let (icon, icon_color, action) = match reason {
+                "reply" => ("↩", Color::Gray, "replied to your post"),
+                "repost" => ("↻", theme::POSITIVE, "reposted your post"),
+                "like" => ("♥", theme::NEGATIVE, "liked your post"),
+                "follow" => ("＋", accent, "followed you"),
+                "mention" => ("@", Color::Yellow, "mentioned you"),
+                "quote" => ("❝", Color::Magenta, "quoted your post"),
+                "subscribed-post" => ("★", Color::Cyan, "posted something new"),
+                "like-via-repost" => ("♥", theme::NEGATIVE, "liked your repost"),
+                "repost-via-repost" => ("↻", theme::POSITIVE, "reposted your repost"),
+                "starterpack-joined" => ("✦", accent, "joined your starter pack"),
+                "verified" => ("✓", accent, "verified your account"),
+                "unverified" => ("?", Color::Yellow, "removed a verification"),
+                _ => ("•", theme::MUTED, "sent a notification"),
+            };
+
+            let duration_text = match DateTime::parse_from_rfc3339(datetime) {
+                Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
+                Err(_) => "".into(),
+            };
+            let unread = group.notifications.iter().any(|item| !item.is_read);
+            let actor = if group.notifications.len() > 1 {
+                format!(
+                    "{display_name} and {} others",
+                    group.notifications.len() - 1
+                )
+            } else {
+                display_name.clone()
+            };
+            let read_marker = if unread { "●" } else { "○" };
+            let mut lines = vec![Line::from(vec![
+                Span::styled(
+                    format!("{read_marker} "),
+                    Style::default().fg(if unread { accent } else { theme::SUBTLE }),
+                ),
+                Span::styled(format!("{icon} "), Style::default().fg(icon_color)),
+                Span::styled(
+                    actor,
+                    Style::default()
+                        .fg(theme::TEXT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!(" {action}"), Style::default().fg(theme::TEXT)),
+                Span::styled(
+                    format!(" · {duration_text}"),
+                    Style::default().fg(theme::MUTED),
+                ),
+            ])];
+
+            let layout = if let Some(post) = crate::app::notifications::post_uri(notification)
+                .and_then(|uri| state.notification_post(uri))
+            {
+                let (mut post_lines, mut layout) =
+                    render_post(&post, &[], &moderation, inner_width);
+                lines.append(&mut post_lines);
+                layout.height = layout.height.saturating_add(1);
+                layout.avatar_row = 1;
+                layout.media_row = layout.media_row.map(|row| row.saturating_add(1));
+                layout
+            } else if let Some(record) = safe_post_record(&notification.record) {
+                for line in wrap_text(&record.text, content_width.saturating_sub(2)) {
+                    lines.push(Line::from(format!("  {line}")));
+                }
+                lines.push(Line::from(Span::styled(
+                    "─".repeat(content_width),
+                    Style::default().fg(theme::SUBTLE),
+                )));
+                PostLayout {
+                    height: lines.len() as u16,
+                    avatar_url: None,
+                    avatar_row: 0,
+                    attachment_urls: Vec::new(),
+                    avatar_width: 0,
+                    content_width: inner_width,
+                    media_row: None,
+                }
+            } else if reason == "follow" {
+                if let Some(description) = notification.author.description.as_deref() {
+                    for line in wrap_text(description, content_width.saturating_sub(2)) {
+                        lines.push(Line::from(Span::styled(
+                            format!("  {line}"),
+                            Style::default().fg(theme::MUTED),
+                        )));
                     }
-                    "starterpack-joined" => {
-                        Span::styled("✦", Style::default().fg(Color::LightBlue))
-                    }
-                    "verified" => Span::styled("✓", Style::default().fg(Color::LightBlue)),
-                    "unverified" => Span::styled("?", Style::default().fg(Color::Yellow)),
-                    _ => Span::from(""),
-                };
-
-                let duration_text = match DateTime::parse_from_rfc3339(datetime) {
-                    Ok(dt) => utils::get_duration_string(dt, Utc::now().fixed_offset()),
-                    Err(_) => "".into(),
-                };
-                let unread = group.notifications.iter().any(|item| !item.is_read);
-                let grouped = if group.notifications.len() > 1 {
-                    format!(" +{} others", group.notifications.len() - 1)
-                } else {
-                    String::new()
-                };
-                let read_marker = if unread { "●" } else { "○" };
-
-                // fixme
-                let subject = match reason {
-                    "reply" | "mention" | "quote" | "subscribed-post" => {
-                        if let Ok(r) = post::Record::try_from_unknown(notification.record.clone()) {
-                            Some(r.text.clone())
-                        } else {
-                            None
-                        }
-                    }
-                    "repost" => {
-                        if let Ok(r) = repost::Record::try_from_unknown(notification.record.clone())
-                        {
-                            my_handle
-                                .clone()
-                                .and_then(|handle| bsky::get_url(handle, r.subject.uri.clone()))
-                        } else {
-                            None
-                        }
-                    }
-                    "like" => like::Record::try_from_unknown(notification.record.clone())
-                        .ok()
-                        .and_then(|r| {
-                            my_handle
-                                .clone()
-                                .and_then(|handle| bsky::get_url(handle, r.subject.uri.clone()))
-                        }),
-                    _ => None,
-                };
-
-                let reason_subject = match reason {
-                    "reply" => "replied to your post",
-                    "repost" => "reposted your post",
-                    "like" => "liked your post",
-                    "follow" => "followed you",
-                    "mention" => "mentioned you",
-                    "quote" => "quoted your post",
-                    "subscribed-post" => "made a new activity post",
-                    "like-via-repost" => "liked your repost",
-                    "repost-via-repost" => "reposted your repost",
-                    "starterpack-joined" => "joined your starter pack",
-                    "verified" => "verified your account",
-                    "unverified" => "removed an account verification",
-                    _ => "",
-                };
-
-                let item = match subject {
-                    Some(subject) => vec![
-                        Line::from(vec![
-                            Span::styled(
-                                format!("{read_marker} "),
-                                Style::default().fg(if unread { accent } else { Color::DarkGray }),
-                            ),
-                            reason_icon,
-                            Span::styled(
-                                format!(" {} ", display_name),
-                                Style::default()
-                                    .fg(theme::TEXT)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                format!("@{} {}{}", handle, duration_text, grouped),
-                                Style::default().fg(theme::MUTED),
-                            ),
-                        ]),
-                        Line::from(reason_subject),
-                        Line::from(subject),
-                        Line::from(""),
-                    ],
-                    None => vec![
-                        Line::from(vec![
-                            Span::styled(
-                                format!("{read_marker} "),
-                                Style::default().fg(if unread { accent } else { Color::DarkGray }),
-                            ),
-                            reason_icon,
-                            Span::styled(
-                                format!(" {display_name} "),
-                                Style::default()
-                                    .fg(theme::TEXT)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                format!("@{handle} {duration_text}{grouped}"),
-                                Style::default().fg(theme::MUTED),
-                            ),
-                        ]),
-                        Line::from(reason_subject),
-                        Line::from(""),
-                    ],
-                };
-
-                ListItem::new(item)
-            })
-            .collect()
-    };
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("  @{handle}"),
+                    Style::default().fg(theme::MUTED),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "─".repeat(content_width),
+                    Style::default().fg(theme::SUBTLE),
+                )));
+                PostLayout {
+                    height: lines.len() as u16,
+                    avatar_url: None,
+                    avatar_row: 0,
+                    attachment_urls: Vec::new(),
+                    avatar_width: 0,
+                    content_width: inner_width,
+                    media_row: None,
+                }
+            } else {
+                lines.push(Line::from(Span::styled(
+                    "─".repeat(content_width),
+                    Style::default().fg(theme::SUBTLE),
+                )));
+                PostLayout {
+                    height: lines.len() as u16,
+                    avatar_url: None,
+                    avatar_row: 0,
+                    attachment_urls: Vec::new(),
+                    avatar_width: 0,
+                    content_width: inner_width,
+                    media_row: None,
+                }
+            };
+            (ListItem::new(lines), layout)
+        })
+        .collect::<Vec<_>>();
 
     let filters = state.notification_filters();
 
-    List::new(list_items)
+    PostList {
+        widget: List::new(
+            rendered
+                .iter()
+                .map(|(item, _)| item.clone())
+                .collect::<Vec<_>>(),
+        )
         .highlight_style(theme::selected_content())
         .block(
             Block::default()
@@ -1122,6 +1148,93 @@ pub fn notifications<'a>(state: &AppState, accent: Color) -> List<'a> {
                     filters.sender.label(),
                     filters.read.label(),
                 ))
+                .border_type(BorderType::Rounded),
+        ),
+        layouts: rendered.into_iter().map(|(_, layout)| layout).collect(),
+    }
+}
+
+pub fn messages(panel: &crate::app::feature_panel::FeaturePanel, accent: Color) -> List<'static> {
+    let items = if panel.rows.is_empty() {
+        vec![ListItem::new("No messages")]
+    } else {
+        panel
+            .rows
+            .iter()
+            .map(|row| {
+                ListItem::new(vec![
+                    Line::from(vec![
+                        Span::styled(
+                            if row.unread { "● " } else { "  " },
+                            Style::default().fg(accent),
+                        ),
+                        Span::styled(
+                            row.title.clone(),
+                            Style::default()
+                                .fg(theme::TEXT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(Span::styled(
+                        format!("  {}", row.detail),
+                        Style::default().fg(theme::MUTED),
+                    )),
+                    Line::from(""),
+                ])
+            })
+            .collect()
+    };
+    let in_conversation = panel.title.starts_with("Conversation ·");
+    List::new(items)
+        .highlight_style(theme::selected_content())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme::border(accent))
+                .padding(Padding::new(1, 1, 1, 1))
+                .title(format!(" {} ", panel.title))
+                .title_bottom(if in_conversation {
+                    " w write  r report  b block  F5 reload  q/Esc back "
+                } else {
+                    " Enter open  n new  Space mute  F5 reload "
+                })
+                .border_type(BorderType::Rounded),
+        )
+}
+
+pub fn explore(panel: &crate::app::feature_panel::FeaturePanel, accent: Color) -> List<'static> {
+    let items = if panel.rows.is_empty() {
+        vec![ListItem::new("No recommendations")]
+    } else {
+        panel
+            .rows
+            .iter()
+            .map(|row| {
+                ListItem::new(vec![
+                    Line::from(Span::styled(
+                        row.title.clone(),
+                        Style::default()
+                            .fg(theme::TEXT)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(Span::styled(
+                        row.detail.clone(),
+                        Style::default().fg(theme::MUTED),
+                    )),
+                    Line::from(""),
+                ])
+            })
+            .collect()
+    };
+    List::new(items)
+        .highlight_style(theme::selected_content())
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme::border(accent))
+                .padding(Padding::new(1, 1, 1, 1))
+                .title(" Explore ")
+                .title_bottom(" Enter explore  / search posts  u search users  F5 reload ")
                 .border_type(BorderType::Rounded),
         )
 }
@@ -1278,7 +1391,7 @@ pub fn reply_input<'a>(state: &AppState) -> Paragraph<'a> {
 }
 
 pub fn tabs<'a>(state: &AppState, accent: Color) -> Tabs<'a> {
-    let titles: Vec<_> = [Tab::Home, Tab::Notifications, Tab::Search]
+    let titles: Vec<_> = [Tab::Home, Tab::Notifications, Tab::Messages, Tab::Search]
         .iter()
         .map(|t| format!("  {}  ", t))
         .collect();
@@ -1308,6 +1421,18 @@ mod tests {
     }
 
     #[test]
+    fn non_post_notification_records_do_not_panic() {
+        let follow_record: Unknown = serde_json::from_value(serde_json::json!({
+            "$type": "app.bsky.graph.follow",
+            "subject": "did:plc:example",
+            "createdAt": "2026-08-30T00:00:00Z"
+        }))
+        .expect("valid unknown record");
+
+        assert!(safe_post_record(&follow_record).is_none());
+    }
+
+    #[test]
     fn wrapping_preserves_emoji_combining_marks_and_rtl_order() {
         assert_eq!(wrap_text("e\u{301}x", 1), vec!["e\u{301}", "x"]);
         assert_eq!(wrap_text("👩‍💻a", 2), vec!["👩‍💻", "a"]);
@@ -1330,6 +1455,7 @@ mod tests {
             PostLayout {
                 height: 5,
                 avatar_url: Some("first".into()),
+                avatar_row: 0,
                 attachment_urls: Vec::new(),
                 avatar_width: 8,
                 content_width: 40,
@@ -1338,6 +1464,7 @@ mod tests {
             PostLayout {
                 height: 5,
                 avatar_url: Some("second".into()),
+                avatar_row: 0,
                 attachment_urls: Vec::new(),
                 avatar_width: 8,
                 content_width: 40,
@@ -1349,5 +1476,23 @@ mod tests {
         assert_eq!(placements.len(), 1);
         assert_eq!(placements[0].url, "second");
         assert_eq!(placements[0].area, Rect::new(2, 2, 8, 4));
+    }
+
+    #[test]
+    fn notification_media_uses_its_post_card_offset() {
+        let layouts = vec![PostLayout {
+            height: 14,
+            avatar_url: None,
+            avatar_row: 1,
+            attachment_urls: vec!["image".into()],
+            avatar_width: 6,
+            content_width: 40,
+            media_row: Some(4),
+        }];
+
+        let placements = image_placements(&layouts, Rect::new(0, 0, 52, 20), 0);
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].url, "image");
+        assert_eq!(placements[0].area, Rect::new(10, 6, 40, 8));
     }
 }

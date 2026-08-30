@@ -15,7 +15,7 @@ use atrium_api::{
         },
         feed::{
             defs, get_actor_feeds, get_actor_likes, get_author_feed, get_feed, get_feed_generators,
-            get_likes, get_post_thread, get_quotes, get_reposted_by, get_timeline, post,
+            get_likes, get_post_thread, get_posts, get_quotes, get_reposted_by, get_timeline, post,
             search_posts, threadgate,
         },
         graph::{
@@ -1556,6 +1556,37 @@ pub async fn notifications(
         .await?;
 
     Ok(notifications)
+}
+
+pub async fn notification_posts(
+    agent: &BskyAgent,
+    notifications: &[notification::list_notifications::Notification],
+) -> Result<Vec<defs::PostView>> {
+    let mut uris = notifications
+        .iter()
+        .filter_map(crate::app::notifications::post_uri)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    uris.sort();
+    uris.dedup();
+
+    let mut posts = Vec::new();
+    for chunk in uris.chunks(25) {
+        let output = agent
+            .api
+            .app
+            .bsky
+            .feed
+            .get_posts(
+                get_posts::ParametersData {
+                    uris: chunk.to_vec(),
+                }
+                .into(),
+            )
+            .await?;
+        posts.extend(output.posts.iter().cloned());
+    }
+    Ok(posts)
 }
 
 pub async fn update_seen(agent: &BskyAgent) -> Result<()> {

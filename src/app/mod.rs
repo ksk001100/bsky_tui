@@ -120,6 +120,8 @@ pub struct App {
     pub(crate) help_table_state: TableState,
     help_return_mode: state::Mode,
     pub(crate) feature_panel: Option<feature_panel::FeaturePanel>,
+    pub(crate) messages: feature_panel::FeaturePanel,
+    pub(crate) explore: feature_panel::FeaturePanel,
     ui_config: config::UiConfig,
     last_auto_refresh: Instant,
 }
@@ -148,6 +150,10 @@ impl App {
             help_table_state: TableState::default().with_selected(Some(0)),
             help_return_mode: state::Mode::Normal,
             feature_panel: None,
+            messages: feature_panel::FeaturePanel::loading(
+                feature_panel::FeatureSection::DirectMessages,
+            ),
+            explore: feature_panel::FeaturePanel::loading(feature_panel::FeatureSection::Discovery),
             ui_config: config::UiConfig::default(),
             last_auto_refresh: Instant::now(),
         }
@@ -224,8 +230,13 @@ impl App {
                 Tab::Notifications => {
                     "↑/↓ select   1/2/3 filter   p settings   f follow   L like   a profile"
                 }
+                Tab::Messages => "↑/↓ select   Enter open   n new   w write   F5 reload   ? help",
                 Tab::Search => {
-                    "↑/↓ select   Enter thread   i image   / search   Tab switch   ? help"
+                    if self.state.get_search_query().is_some() {
+                        "↑/↓ select   Enter thread   Esc explore   / search   Tab switch   ? help"
+                    } else {
+                        "↑/↓ select   Enter explore   / search   u users   Tab switch   ? help"
+                    }
                 }
             },
             state::Mode::Help => "↑/↓ move   PgUp/PgDn jump   q/Esc close",
@@ -269,7 +280,8 @@ impl App {
         ) || self
             .feature_panel
             .as_ref()
-            .is_some_and(|panel| panel.prompt.is_some());
+            .is_some_and(|panel| panel.prompt.is_some())
+            || self.messages.prompt.is_some();
         let key = close_or_back_key(key, text_entry_active);
 
         if self.error.is_some() {
@@ -312,15 +324,24 @@ impl App {
         if self.state.get_mode() == state::Mode::Normal {
             if self.configured_key("action_menu", key, Key::Char(':')) {
                 self.action_menu = Some(ActionMenu {
-                    items: action_items(self.state.get_tab()),
+                    items: action_items(
+                        self.state.get_tab(),
+                        self.state.get_search_query().is_some(),
+                    ),
                     index: 0,
                 });
                 return AppReturn::Continue;
             }
+            if self.configured_key("open_dm", key, Key::Char('d')) {
+                self.state.set_tab(Tab::Messages);
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                    feature_panel::FeatureSection::DirectMessages,
+                )))
+                .await;
+                return AppReturn::Continue;
+            }
             let section = if self.configured_key("open_lists", key, Key::Char('g')) {
                 Some(feature_panel::FeatureSection::Lists)
-            } else if self.configured_key("open_dm", key, Key::Char('d')) {
-                Some(feature_panel::FeatureSection::DirectMessages)
             } else if self.configured_key("open_moderation", key, Key::Char(';')) {
                 Some(feature_panel::FeatureSection::Moderation)
             } else if self.configured_key("open_settings", key, Key::Char(',')) {
@@ -349,6 +370,7 @@ impl App {
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => self.timeline_action(key).await,
                 Tab::Notifications => self.notifications_action(key).await,
+                Tab::Messages => self.messages_action(key).await,
                 Tab::Search => self.search_action(key).await,
             },
             state::Mode::Post => self.post_action(key).await,
@@ -529,6 +551,12 @@ impl App {
                         self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
                             .await;
                     }
+                    Tab::Messages => {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                            feature_panel::FeatureSection::DirectMessages,
+                        )))
+                        .await;
+                    }
                     Tab::Search => {}
                 }
                 AppReturn::Continue
@@ -545,6 +573,216 @@ impl App {
             }
             _ => AppReturn::Continue,
         }
+    }
+
+    async fn messages_action(&mut self, key: Key) -> AppReturn {
+        if self.messages.prompt.is_some() {
+            return self.message_prompt_action(key).await;
+        }
+
+        let selected = self.messages.selected_row().cloned();
+        match key {
+            Key::Ctrl('c') => AppReturn::Exit,
+            Key::Char('?') | Key::F1 => {
+                self.open_help();
+                AppReturn::Continue
+            }
+            Key::F5 => {
+                if let Some(convo_id) = self
+                    .messages
+                    .title
+                    .strip_prefix("Conversation · ")
+                    .map(str::to_owned)
+                {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::OpenConversation(convo_id)))
+                        .await;
+                } else {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                        feature_panel::FeatureSection::DirectMessages,
+                    )))
+                    .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Up | Key::Char('k') | Key::Ctrl('p') => {
+                self.messages.previous();
+                AppReturn::Continue
+            }
+            Key::Down | Key::Char('j') | Key::Ctrl('n') => {
+                self.messages.next();
+                AppReturn::Continue
+            }
+            Key::Enter | Key::Char('o') => {
+                if let Some(feature_panel::FeatureTarget::Conversation { id, .. }) =
+                    selected.map(|row| row.target)
+                {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::OpenConversation(id)))
+                        .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('n') => {
+                self.open_message_prompt(
+                    "New conversation".into(),
+                    "Handle or DID".into(),
+                    feature_panel::FeaturePromptAction::NewConversation,
+                );
+                AppReturn::Continue
+            }
+            Key::Char('w') => {
+                let convo_id = match selected.map(|row| row.target) {
+                    Some(feature_panel::FeatureTarget::Conversation { id, .. }) => Some(id),
+                    Some(feature_panel::FeatureTarget::Message { convo_id, .. }) => Some(convo_id),
+                    _ => None,
+                }
+                .or_else(|| {
+                    self.messages
+                        .title
+                        .strip_prefix("Conversation · ")
+                        .map(str::to_owned)
+                });
+                if let Some(convo_id) = convo_id {
+                    self.open_message_prompt(
+                        "Send message".into(),
+                        "Text message (1000 characters maximum)".into(),
+                        feature_panel::FeaturePromptAction::SendMessage { convo_id },
+                    );
+                }
+                AppReturn::Continue
+            }
+            Key::Char(' ') => {
+                if let Some(feature_panel::FeatureTarget::Conversation { id, muted, .. }) =
+                    selected.map(|row| row.target)
+                {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::ToggleConversationMute {
+                        convo_id: id,
+                        muted,
+                    }))
+                    .await;
+                }
+                AppReturn::Continue
+            }
+            Key::Char('r') => {
+                let subject = match selected.map(|row| row.target) {
+                    Some(feature_panel::FeatureTarget::Message {
+                        convo_id,
+                        id,
+                        sender,
+                    }) => Some(feature_panel::ReportSubject::Conversation {
+                        convo_id,
+                        message_id: Some(format!("{id}@{}", sender.as_str())),
+                        sender,
+                    }),
+                    Some(feature_panel::FeatureTarget::Conversation { id, members, .. }) => members
+                        .into_iter()
+                        .next()
+                        .map(|sender| feature_panel::ReportSubject::Conversation {
+                            convo_id: id,
+                            message_id: None,
+                            sender,
+                        }),
+                    _ => None,
+                };
+                if let Some(subject) = subject {
+                    self.open_message_prompt(
+                        "Report".into(),
+                        "spam|rude|sexual|violation|misleading|other | details".into(),
+                        feature_panel::FeaturePromptAction::Report { subject },
+                    );
+                }
+                AppReturn::Continue
+            }
+            Key::Char('b') => {
+                let did = match selected.map(|row| row.target) {
+                    Some(feature_panel::FeatureTarget::Conversation { members, .. }) => {
+                        members.into_iter().next()
+                    }
+                    Some(feature_panel::FeatureTarget::Message { sender, .. }) => Some(sender),
+                    _ => None,
+                };
+                if let Some(did) = did {
+                    self.pending_confirmation = Some(ModerationAction::BlockActor {
+                        did,
+                        blocking_uri: None,
+                    });
+                }
+                AppReturn::Continue
+            }
+            Key::Esc => {
+                if let Some(parent) = self.messages.parent.take().map(|parent| *parent) {
+                    self.messages = parent;
+                }
+                AppReturn::Continue
+            }
+            Key::Tab => {
+                self.state.set_next_tab();
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                    feature_panel::FeatureSection::Discovery,
+                )))
+                .await;
+                AppReturn::Continue
+            }
+            _ => AppReturn::Continue,
+        }
+    }
+
+    async fn message_prompt_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Esc => self.messages.prompt = None,
+            Key::Enter => {
+                if let Some(prompt) = self.messages.prompt.take() {
+                    let value = prompt.input.value().trim().to_owned();
+                    self.dispatch(IoEvent::Feature(FeatureEvent::Submit(prompt.action, value)))
+                        .await;
+                }
+            }
+            Key::Left | Key::Ctrl('b') => {
+                if let Some(prompt) = self.messages.prompt.as_mut() {
+                    prompt.input.handle(InputRequest::GoToPrevChar);
+                }
+            }
+            Key::Right | Key::Ctrl('f') => {
+                if let Some(prompt) = self.messages.prompt.as_mut() {
+                    prompt.input.handle(InputRequest::GoToNextChar);
+                }
+            }
+            Key::Ctrl('a') => {
+                if let Some(prompt) = self.messages.prompt.as_mut() {
+                    prompt.input.handle(InputRequest::GoToStart);
+                }
+            }
+            Key::Ctrl('e') => {
+                if let Some(prompt) = self.messages.prompt.as_mut() {
+                    prompt.input.handle(InputRequest::GoToEnd);
+                }
+            }
+            Key::Backspace | Key::Ctrl('h') => {
+                if let Some(prompt) = self.messages.prompt.as_mut() {
+                    prompt.input.handle(InputRequest::DeletePrevChar);
+                }
+            }
+            Key::Char(character) => {
+                if let Some(prompt) = self.messages.prompt.as_mut() {
+                    prompt.input.handle(InputRequest::InsertChar(character));
+                }
+            }
+            _ => {}
+        }
+        AppReturn::Continue
+    }
+
+    fn open_message_prompt(
+        &mut self,
+        label: String,
+        help: String,
+        action: feature_panel::FeaturePromptAction,
+    ) {
+        self.messages.prompt = Some(feature_panel::FeaturePrompt {
+            label,
+            help,
+            action,
+            input: Input::default(),
+        });
     }
 
     async fn notifications_action(&mut self, key: Key) -> AppReturn {
@@ -633,7 +871,17 @@ impl App {
                 self.state.move_notifications_bottom();
                 AppReturn::Continue
             }
-            Key::Enter | Key::Char('o') => {
+            Key::Enter => {
+                if let Some(post) = self.state.get_current_notification_post() {
+                    self.dispatch(IoEvent::LoadThread(post.uri.clone())).await;
+                } else {
+                    self.set_error(
+                        "This notification does not refer to a post that can be opened".to_owned(),
+                    );
+                }
+                AppReturn::Continue
+            }
+            Key::Char('o') => {
                 let url = self
                     .state
                     .get_current_notification()
@@ -671,6 +919,12 @@ impl App {
                     Tab::Notifications => {
                         self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
                             .await;
+                    }
+                    Tab::Messages => {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                            feature_panel::FeatureSection::DirectMessages,
+                        )))
+                        .await;
                     }
                     Tab::Search => {}
                 }
@@ -731,8 +985,19 @@ impl App {
     }
 
     async fn search_action(&mut self, key: Key) -> AppReturn {
+        if self.state.get_search_query().is_none() {
+            return self.explore_action(key).await;
+        }
         match key {
             Key::Ctrl('c') => AppReturn::Exit,
+            Key::Esc => {
+                self.state.set_search_query(None);
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                    feature_panel::FeatureSection::Discovery,
+                )))
+                .await;
+                AppReturn::Continue
+            }
             Key::F5 => {
                 self.dispatch(IoEvent::Search(SearchEvent::Reload)).await;
                 AppReturn::Continue
@@ -868,6 +1133,12 @@ impl App {
                         self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
                             .await;
                     }
+                    Tab::Messages => {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                            feature_panel::FeatureSection::DirectMessages,
+                        )))
+                        .await;
+                    }
                     Tab::Search => {}
                 }
                 AppReturn::Continue
@@ -896,6 +1167,70 @@ impl App {
                         self.dispatch(IoEvent::Search(SearchEvent::Next)).await;
                     }
                 }
+                AppReturn::Continue
+            }
+            _ => AppReturn::Continue,
+        }
+    }
+
+    async fn explore_action(&mut self, key: Key) -> AppReturn {
+        match key {
+            Key::Ctrl('c') => AppReturn::Exit,
+            Key::Char('?') | Key::F1 => {
+                self.open_help();
+                AppReturn::Continue
+            }
+            Key::Char('/') => {
+                self.state.set_mode(state::Mode::Search);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
+            Key::Char('u') => {
+                self.state.set_mode(state::Mode::UserSearch);
+                self.state.set_input(Input::default());
+                AppReturn::Continue
+            }
+            Key::F5 => {
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                    feature_panel::FeatureSection::Discovery,
+                )))
+                .await;
+                AppReturn::Continue
+            }
+            Key::Down | Key::Char('j') | Key::Ctrl('n') => {
+                self.explore.next();
+                AppReturn::Continue
+            }
+            Key::Up | Key::Char('k') | Key::Ctrl('p') => {
+                self.explore.previous();
+                AppReturn::Continue
+            }
+            Key::Home => {
+                self.explore.selected = 0;
+                AppReturn::Continue
+            }
+            Key::End => {
+                self.explore.selected = self.explore.rows.len().saturating_sub(1);
+                AppReturn::Continue
+            }
+            Key::Enter | Key::Char('o') => {
+                match self.explore.selected_row().map(|row| row.target.clone()) {
+                    Some(feature_panel::FeatureTarget::Topic(topic)) => {
+                        self.state.set_search_query(Some(topic.clone()));
+                        self.dispatch(IoEvent::Search(SearchEvent::Load(topic)))
+                            .await;
+                    }
+                    Some(feature_panel::FeatureTarget::Actor(actor)) => {
+                        self.dispatch(IoEvent::LoadProfile(actor)).await;
+                    }
+                    _ => {}
+                }
+                AppReturn::Continue
+            }
+            Key::Tab => {
+                self.state.set_next_tab();
+                self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                    .await;
                 AppReturn::Continue
             }
             _ => AppReturn::Continue,
@@ -1588,8 +1923,25 @@ impl App {
         let section = match key {
             Key::Char('1') => Some(feature_panel::FeatureSection::Lists),
             Key::Char('2') => Some(feature_panel::FeatureSection::StarterPacks),
-            Key::Char('3') => Some(feature_panel::FeatureSection::Discovery),
-            Key::Char('4') => Some(feature_panel::FeatureSection::DirectMessages),
+            Key::Char('3') => {
+                self.feature_panel = None;
+                self.state.set_tab(Tab::Search);
+                self.state.set_search_query(None);
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                    feature_panel::FeatureSection::Discovery,
+                )))
+                .await;
+                return AppReturn::Continue;
+            }
+            Key::Char('4') => {
+                self.feature_panel = None;
+                self.state.set_tab(Tab::Messages);
+                self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                    feature_panel::FeatureSection::DirectMessages,
+                )))
+                .await;
+                return AppReturn::Continue;
+            }
             Key::Char('5') => Some(feature_panel::FeatureSection::Moderation),
             Key::Char('6') => Some(feature_panel::FeatureSection::Settings),
             _ => None,
@@ -2036,6 +2388,37 @@ impl App {
         }
     }
 
+    pub fn set_message_rows(&mut self, title: String, rows: Vec<feature_panel::FeatureRow>) {
+        self.messages.replace(title, rows);
+    }
+
+    pub fn open_message_conversation(
+        &mut self,
+        title: String,
+        rows: Vec<feature_panel::FeatureRow>,
+    ) {
+        if self.messages.title.starts_with("Conversation ·") {
+            self.messages.replace(title, rows);
+        } else {
+            self.messages = self.messages.child(title, rows);
+        }
+    }
+
+    pub fn messages(&self) -> &feature_panel::FeaturePanel {
+        &self.messages
+    }
+
+    pub fn set_explore_rows(&mut self, rows: Vec<feature_panel::FeatureRow>) {
+        self.explore.replace(
+            feature_panel::FeatureSection::Discovery.title().to_owned(),
+            rows,
+        );
+    }
+
+    pub fn explore(&self) -> &feature_panel::FeaturePanel {
+        &self.explore
+    }
+
     pub fn feature_panel(&self) -> Option<&feature_panel::FeaturePanel> {
         self.feature_panel.as_ref()
     }
@@ -2164,6 +2547,7 @@ impl App {
                     return match self.state.get_tab() {
                         Tab::Home => self.timeline_action(key).await,
                         Tab::Notifications => self.notifications_action(key).await,
+                        Tab::Messages => self.messages_action(key).await,
                         Tab::Search => self.search_action(key).await,
                     };
                 }
@@ -2179,9 +2563,10 @@ impl App {
             MouseEventKind::ScrollDown => self.move_current_selection(3),
             MouseEventKind::Down(MouseButton::Left) if mouse.row <= 6 => {
                 let width = crossterm::terminal::size().map_or(1, |size| size.0.max(1));
-                let tab = match mouse.column.saturating_mul(3) / width {
+                let tab = match mouse.column.saturating_mul(4) / width {
                     0 => Tab::Home,
                     1 => Tab::Notifications,
+                    2 => Tab::Messages,
                     _ => Tab::Search,
                 };
                 if self.state.get_mode() == state::Mode::Normal {
@@ -2194,6 +2579,18 @@ impl App {
                         Tab::Notifications => {
                             self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Load))
                                 .await
+                        }
+                        Tab::Messages => {
+                            self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                                feature_panel::FeatureSection::DirectMessages,
+                            )))
+                            .await
+                        }
+                        Tab::Search if self.state.get_search_query().is_none() => {
+                            self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                                feature_panel::FeatureSection::Discovery,
+                            )))
+                            .await
                         }
                         _ => {}
                     }
@@ -2211,7 +2608,30 @@ impl App {
             state::Mode::Normal => match self.state.get_tab() {
                 Tab::Home => self.state.move_tl_scroll_by(delta),
                 Tab::Notifications => self.state.move_notifications_scroll_by(delta),
-                Tab::Search => self.state.move_search_scroll_by(delta),
+                Tab::Messages => {
+                    if delta < 0 {
+                        for _ in 0..delta.unsigned_abs() {
+                            self.messages.previous();
+                        }
+                    } else {
+                        for _ in 0..delta as usize {
+                            self.messages.next();
+                        }
+                    }
+                }
+                Tab::Search => {
+                    if self.state.get_search_query().is_some() {
+                        self.state.move_search_scroll_by(delta);
+                    } else if delta < 0 {
+                        for _ in 0..delta.unsigned_abs() {
+                            self.explore.previous();
+                        }
+                    } else {
+                        for _ in 0..delta as usize {
+                            self.explore.next();
+                        }
+                    }
+                }
             },
             _ => {}
         }
@@ -2229,8 +2649,12 @@ impl App {
                     .state
                     .get_current_feed()
                     .map(|feed| feed.post.data.clone()),
-                Tab::Search => self.state.get_current_search_result(),
-                Tab::Notifications => None,
+                Tab::Search if self.state.get_search_query().is_some() => {
+                    self.state.get_current_search_result()
+                }
+                Tab::Search => None,
+                Tab::Notifications => self.state.get_current_notification_post(),
+                Tab::Messages => None,
             },
         }
     }
@@ -2321,12 +2745,44 @@ impl App {
             && !self.is_loading
             && self.error.is_none()
             && self.state.get_mode() == state::Mode::Normal
-            && self.state.get_tab() == Tab::Home
             && self.last_auto_refresh.elapsed() >= Duration::from_secs(interval)
         {
             self.last_auto_refresh = Instant::now();
-            self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
-                .await;
+            match self.state.get_tab() {
+                Tab::Home => {
+                    self.dispatch(IoEvent::LoadTimeline(TimelineEvent::Reload))
+                        .await
+                }
+                Tab::Notifications => {
+                    self.dispatch(IoEvent::LoadNotifications(NotificationEvent::Reload))
+                        .await
+                }
+                Tab::Messages => {
+                    if let Some(convo_id) = self
+                        .messages
+                        .title
+                        .strip_prefix("Conversation · ")
+                        .map(str::to_owned)
+                    {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::OpenConversation(convo_id)))
+                            .await
+                    } else {
+                        self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                            feature_panel::FeatureSection::DirectMessages,
+                        )))
+                        .await
+                    }
+                }
+                Tab::Search if self.state.get_search_query().is_some() => {
+                    self.dispatch(IoEvent::Search(SearchEvent::Reload)).await
+                }
+                Tab::Search => {
+                    self.dispatch(IoEvent::Feature(FeatureEvent::Load(
+                        feature_panel::FeatureSection::Discovery,
+                    )))
+                    .await
+                }
+            }
         }
         AppReturn::Continue
     }
@@ -2499,7 +2955,26 @@ fn close_or_back_key(key: Key, text_entry_active: bool) -> Key {
     }
 }
 
-fn action_items(tab: Tab) -> Vec<(&'static str, Key)> {
+fn action_items(tab: Tab, has_search_results: bool) -> Vec<(&'static str, Key)> {
+    if tab == Tab::Messages {
+        return vec![
+            ("Reload messages", Key::F5),
+            ("Open conversation", Key::Enter),
+            ("New conversation", Key::Char('n')),
+            ("Write message", Key::Char('w')),
+            ("Mute or unmute conversation", Key::Char(' ')),
+        ];
+    }
+    if tab == Tab::Search && !has_search_results {
+        return vec![
+            ("Reload", Key::F5),
+            ("Open selected item", Key::Enter),
+            ("Search posts", Key::Char('/')),
+            ("Search users", Key::Char('u')),
+            ("First item", Key::Home),
+            ("Last item", Key::End),
+        ];
+    }
     let mut items = vec![
         ("Reload", Key::F5),
         ("Open selected item", Key::Enter),

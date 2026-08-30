@@ -190,6 +190,16 @@ pub fn groups(
     result
 }
 
+pub fn post_uri(notification: &Notification) -> Option<&str> {
+    match notification.reason.as_str() {
+        "reply" | "mention" | "quote" | "subscribed-post" => Some(&notification.uri),
+        "like" | "repost" | "like-via-repost" | "repost-via-repost" => {
+            notification.reason_subject.as_deref()
+        }
+        _ => None,
+    }
+}
+
 fn group_key(reason: &str, subject: Option<&str>) -> Option<String> {
     matches!(reason, "like" | "repost" | "follow")
         .then(|| format!("{reason}:{}", subject.unwrap_or("account")))

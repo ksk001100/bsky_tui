@@ -473,6 +473,7 @@ dependencies = [
  "rpassword",
  "seahorse",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
  "tui-input",
