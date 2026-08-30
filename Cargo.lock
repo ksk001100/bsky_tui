@@ -454,7 +454,7 @@ dependencies = [
 
 [[package]]
 name = "bsky_tui"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "atrium-api",
  "atrium-xrpc",
