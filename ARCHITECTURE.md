@@ -33,7 +33,9 @@ App ──► ui::render
   multi-step effects.
 - `app/ui/` renders the current model. Mutable values used during rendering are
   presentation caches required by Ratatui and do not update domain state.
-- `app/state/` owns domain state operations, grouped by feature.
+- `app/state/` owns a single top-level `Model`, composed from session,
+  navigation, composer, home, notification, explore, thread, and profile state.
+  State operations are grouped by feature and mutate only their domain state.
 - `bsky/` contains Bluesky API services and is independent of the reducer.
 
 ## Invariants
@@ -43,4 +45,3 @@ App ──► ui::render
 3. Effect workers receive snapshots and cannot access `Arc<Mutex<App>>`.
 4. Effect results re-enter the same event loop as user input.
 5. New asynchronous features require a `Command` and a typed `EffectMessage`.
-

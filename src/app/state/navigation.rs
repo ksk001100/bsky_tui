@@ -1,139 +1,85 @@
-//! navigation state operations.
+//! Navigation state operations.
 
 use super::*;
 
 impl AppState {
     pub fn set_mode(&mut self, mode: Mode) {
-        if let Self::Initialized { mode: m, .. } = self {
-            *m = mode;
+        if let Some(model) = self.model_mut() {
+            model.navigation.mode = mode;
         }
     }
 
     pub fn get_mode(&self) -> Mode {
-        if let Self::Initialized { mode, .. } = self {
-            *mode
-        } else {
-            Mode::Normal
-        }
+        self.model()
+            .map_or(Mode::Normal, |model| model.navigation.mode)
     }
 
     pub fn is_normal_mode(&self) -> bool {
-        if let Self::Initialized { mode, .. } = self {
-            matches!(mode, Mode::Normal)
-        } else {
-            false
-        }
+        self.has_mode(Mode::Normal)
     }
-
     pub fn is_post_mode(&self) -> bool {
-        if let Self::Initialized { mode, .. } = self {
-            matches!(mode, Mode::Post)
-        } else {
-            false
-        }
+        self.has_mode(Mode::Post)
     }
-
     pub fn is_reply_mode(&self) -> bool {
-        if let Self::Initialized { mode, .. } = self {
-            matches!(mode, Mode::Reply)
-        } else {
-            false
-        }
+        self.has_mode(Mode::Reply)
     }
-
     pub fn is_help_mode(&self) -> bool {
-        if let Self::Initialized { mode, .. } = self {
-            matches!(mode, Mode::Help)
-        } else {
-            false
-        }
+        self.has_mode(Mode::Help)
     }
-
     pub fn is_search_mode(&self) -> bool {
-        if let Self::Initialized { mode, .. } = self {
-            matches!(mode, Mode::Search)
-        } else {
-            false
-        }
+        self.has_mode(Mode::Search)
     }
-
     pub fn is_user_search_mode(&self) -> bool {
-        matches!(
-            self,
-            Self::Initialized {
-                mode: Mode::UserSearch,
-                ..
-            }
-        )
+        self.has_mode(Mode::UserSearch)
+    }
+    pub fn is_feed_search_mode(&self) -> bool {
+        self.has_mode(Mode::FeedSearch)
     }
 
-    pub fn is_feed_search_mode(&self) -> bool {
-        matches!(
-            self,
-            Self::Initialized {
-                mode: Mode::FeedSearch,
-                ..
-            }
-        )
+    fn has_mode(&self, mode: Mode) -> bool {
+        self.model()
+            .is_some_and(|model| model.navigation.mode == mode)
     }
 
     pub fn get_tl_list_state(&self) -> ListState {
-        if let Self::Initialized { tl_list_state, .. } = self {
-            *tl_list_state
-        } else {
-            ListState::default()
-        }
+        self.model()
+            .map_or_else(ListState::default, |model| model.home.selection.list)
     }
 
     pub fn get_notifications_list_state(&self) -> ListState {
-        if let Self::Initialized {
-            notifications_list_state,
-            ..
-        } = self
-        {
-            *notifications_list_state
-        } else {
-            ListState::default()
-        }
+        self.model().map_or_else(ListState::default, |model| {
+            model.notifications.selection.list
+        })
     }
 
     pub fn get_current_feed(&self) -> Option<FeedViewPost> {
-        if let Self::Initialized {
-            timeline,
-            tl_list_position,
-            ..
-        } = self
-        {
-            timeline
-                .clone()
-                .and_then(|f| f.get(*tl_list_position).cloned())
-        } else {
-            None
-        }
+        let model = self.model()?;
+        model
+            .home
+            .timeline
+            .as_ref()
+            .and_then(|items| items.get(model.home.selection.position))
+            .cloned()
     }
 
     pub fn get_tab(&self) -> Tab {
-        if let Self::Initialized { tab, .. } = self {
-            *tab
-        } else {
-            Tab::Home
-        }
+        self.model().map_or(Tab::Home, |model| model.navigation.tab)
     }
 
     pub fn set_tab(&mut self, tab: Tab) {
-        if let Self::Initialized { tab: t, .. } = self {
-            *t = tab;
+        if let Some(model) = self.model_mut() {
+            model.navigation.tab = tab;
         }
     }
 
     pub fn set_next_tab(&mut self) {
-        if let Self::Initialized { tab, .. } = self {
-            *tab = match tab {
+        if let Some(model) = self.model_mut() {
+            model.navigation.tab = match model.navigation.tab {
                 Tab::Home => Tab::Notifications,
                 Tab::Notifications => Tab::Messages,
                 Tab::Messages => Tab::Search,
                 Tab::Search => Tab::Home,
-            }
+            };
         }
     }
 }

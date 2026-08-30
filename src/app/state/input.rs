@@ -1,63 +1,43 @@
-//! input state operations.
+//! Input and account identity state operations.
 
 use super::*;
 
 impl AppState {
     pub fn get_did(&self) -> Option<Did> {
-        if let Self::Initialized { did, .. } = self {
-            Some(did.clone())
-        } else {
-            None
-        }
+        self.model().map(|model| model.session.did.clone())
     }
 
     pub fn get_input(&self) -> Input {
-        if let Self::Initialized { input, .. } = self {
-            input.clone()
-        } else {
-            Input::default()
+        self.model()
+            .map(|model| model.composer.input.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn set_input(&mut self, input: Input) {
+        if let Some(model) = self.model_mut() {
+            model.composer.input = input;
         }
     }
 
-    pub fn set_input(&mut self, i: Input) {
-        if let Self::Initialized { input, .. } = self {
-            *input = i;
-        }
-    }
-
-    pub fn insert_input(&mut self, req: InputRequest) {
-        if let Self::Initialized { input: i, .. } = self {
-            i.handle(req);
+    pub fn insert_input(&mut self, request: InputRequest) {
+        if let Some(model) = self.model_mut() {
+            model.composer.input.handle(request);
         }
     }
 
     pub fn move_input_cursor_prev(&mut self) {
-        if let Self::Initialized { input, .. } = self {
-            input.handle(InputRequest::GoToPrevChar);
-        }
+        self.insert_input(InputRequest::GoToPrevChar);
     }
-
     pub fn move_input_cursor_next(&mut self) {
-        if let Self::Initialized { input, .. } = self {
-            input.handle(InputRequest::GoToNextChar);
-        }
+        self.insert_input(InputRequest::GoToNextChar);
     }
-
     pub fn move_input_cursor_start(&mut self) {
-        if let Self::Initialized { input, .. } = self {
-            input.handle(InputRequest::GoToStart);
-        }
+        self.insert_input(InputRequest::GoToStart);
     }
-
     pub fn move_input_cursor_end(&mut self) {
-        if let Self::Initialized { input, .. } = self {
-            input.handle(InputRequest::GoToEnd);
-        }
+        self.insert_input(InputRequest::GoToEnd);
     }
-
     pub fn remove_input_prev(&mut self) {
-        if let Self::Initialized { input, .. } = self {
-            input.handle(InputRequest::DeletePrevChar);
-        }
+        self.insert_input(InputRequest::DeletePrevChar);
     }
 }

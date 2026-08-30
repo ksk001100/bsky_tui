@@ -71,44 +71,95 @@ impl fmt::Display for Tab {
     }
 }
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Default)]
 pub enum AppState {
     #[default]
     Init,
-    Initialized {
-        agent: Arc<BskyAgent>,
-        timeline: Option<Vec<FeedViewPost>>,
-        notifications: Option<Vec<Notification>>,
-        search_results: Option<Vec<PostViewData>>,
-        input: Input,
-        tl_list_state: ListState,
-        tl_list_position: usize,
-        notifications_list_state: ListState,
-        notifications_list_position: usize,
-        notifications_current_cursor_index: usize,
-        notification_cursors: Vec<Option<String>>,
-        notification_filters: NotificationFilters,
-        notification_posts: HashMap<String, PostViewData>,
-        search_list_state: ListState,
-        search_list_position: usize,
-        handle: Handle,
-        did: Did,
-        mode: Mode,
-        tab: Tab,
-        tl_current_cursor_index: usize,
-        cursors: Vec<Option<String>>,
-        search_current_cursor_index: usize,
-        search_cursors: Vec<Option<String>>,
-        search_query: Option<String>,
-        moderation: ModerationPrefs,
-        thread: Option<Vec<ThreadEntry>>,
-        thread_list_state: ListState,
-        thread_list_position: usize,
-        profile: Option<ProfileState>,
-        active_feed: FeedDescriptor,
-        feed_snapshots: HashMap<String, FeedSnapshot>,
-    },
+    Initialized(Box<Model>),
+}
+
+#[derive(Clone)]
+pub struct Model {
+    session: SessionState,
+    navigation: NavigationState,
+    composer: ComposerState,
+    home: HomeState,
+    notifications: NotificationState,
+    explore: ExploreState,
+    thread: ThreadState,
+    profile: Option<ProfileState>,
+}
+
+#[derive(Clone)]
+struct SessionState {
+    agent: Arc<BskyAgent>,
+    handle: Handle,
+    did: Did,
+    moderation: ModerationPrefs,
+}
+
+#[derive(Clone)]
+struct NavigationState {
+    mode: Mode,
+    tab: Tab,
+}
+
+#[derive(Clone, Default)]
+struct ComposerState {
+    input: Input,
+}
+
+#[derive(Clone)]
+struct HomeState {
+    timeline: Option<Vec<FeedViewPost>>,
+    selection: SelectionState,
+    pagination: PaginationState,
+    active_feed: FeedDescriptor,
+    feed_snapshots: HashMap<String, FeedSnapshot>,
+}
+
+#[derive(Clone)]
+struct NotificationState {
+    items: Option<Vec<Notification>>,
+    selection: SelectionState,
+    pagination: PaginationState,
+    filters: NotificationFilters,
+    posts: HashMap<String, PostViewData>,
+}
+
+#[derive(Clone)]
+struct ExploreState {
+    results: Option<Vec<PostViewData>>,
+    selection: SelectionState,
+    pagination: PaginationState,
+    query: Option<String>,
+}
+
+#[derive(Clone, Default)]
+struct ThreadState {
+    entries: Option<Vec<ThreadEntry>>,
+    selection: SelectionState,
+}
+
+#[derive(Clone, Default)]
+struct SelectionState {
+    list: ListState,
+    position: usize,
+}
+
+#[derive(Clone)]
+struct PaginationState {
+    current: usize,
+    cursors: Vec<Option<String>>,
+}
+
+impl Default for PaginationState {
+    fn default() -> Self {
+        Self {
+            current: 0,
+            cursors: vec![None],
+        }
+    }
 }
 
 impl AppState {
@@ -119,66 +170,86 @@ impl AppState {
         moderation: ModerationPrefs,
     ) -> Self {
         let agent = Arc::new(agent);
-        Self::Initialized {
-            agent,
-            timeline: None,
-            notifications: None,
-            search_results: None,
-            input: Input::default(),
-            tl_list_state: ListState::default().with_selected(Some(0)),
-            tl_list_position: 0,
-            notifications_list_state: ListState::default().with_selected(Some(0)),
-            notifications_list_position: 0,
-            notifications_current_cursor_index: 0,
-            notification_cursors: vec![None],
-            notification_filters: NotificationFilters::default(),
-            notification_posts: HashMap::new(),
-            search_list_state: ListState::default().with_selected(Some(0)),
-            search_list_position: 0,
-            handle,
-            did,
-            mode: Mode::Normal,
-            tab: Tab::Home,
-            tl_current_cursor_index: 0,
-            cursors: vec![None],
-            search_current_cursor_index: 0,
-            search_cursors: vec![None],
-            search_query: None,
-            moderation,
-            thread: None,
-            thread_list_state: ListState::default(),
-            thread_list_position: 0,
+        let selected = || SelectionState {
+            list: ListState::default().with_selected(Some(0)),
+            position: 0,
+        };
+        Self::Initialized(Box::new(Model {
+            session: SessionState {
+                agent,
+                handle,
+                did,
+                moderation,
+            },
+            navigation: NavigationState {
+                mode: Mode::Normal,
+                tab: Tab::Home,
+            },
+            composer: ComposerState::default(),
+            home: HomeState {
+                timeline: None,
+                selection: selected(),
+                pagination: PaginationState::default(),
+                active_feed: FeedDescriptor::following(),
+                feed_snapshots: HashMap::new(),
+            },
+            notifications: NotificationState {
+                items: None,
+                selection: selected(),
+                pagination: PaginationState::default(),
+                filters: NotificationFilters::default(),
+                posts: HashMap::new(),
+            },
+            explore: ExploreState {
+                results: None,
+                selection: selected(),
+                pagination: PaginationState::default(),
+                query: None,
+            },
+            thread: ThreadState::default(),
             profile: None,
-            active_feed: FeedDescriptor::following(),
-            feed_snapshots: HashMap::new(),
-        }
+        }))
     }
 
     pub fn is_initialized(&self) -> bool {
-        matches!(self, &Self::Initialized { .. })
+        matches!(self, &Self::Initialized(_))
     }
 
     pub fn get_handle(&self) -> Option<Handle> {
-        if let Self::Initialized { handle, .. } = self {
-            Some(handle.clone())
+        if let Self::Initialized(model) = self {
+            Some(model.session.handle.clone())
         } else {
             None
         }
     }
 
     pub fn get_agent(&self) -> Option<Arc<BskyAgent>> {
-        if let Self::Initialized { agent, .. } = self {
-            Some(agent.clone())
+        if let Self::Initialized(model) = self {
+            Some(model.session.agent.clone())
         } else {
             None
         }
     }
 
     pub fn moderation(&self) -> ModerationPrefs {
-        if let Self::Initialized { moderation, .. } = self {
-            moderation.clone()
+        if let Self::Initialized(model) = self {
+            model.session.moderation.clone()
         } else {
             ModerationPrefs::default()
+        }
+    }
+
+    fn model(&self) -> Option<&Model> {
+        match self {
+            Self::Initialized(model) => Some(model),
+            Self::Init => None,
+        }
+    }
+
+    fn model_mut(&mut self) -> Option<&mut Model> {
+        match self {
+            Self::Initialized(model) => Some(model),
+            Self::Init => None,
         }
     }
 }

@@ -1,189 +1,119 @@
-//! pagination state operations.
+//! Pagination state operations.
 
 use super::*;
 
+fn current_cursor(pagination: &PaginationState) -> Option<String> {
+    pagination
+        .cursors
+        .get(pagination.current)
+        .cloned()
+        .flatten()
+}
+
+fn next_cursor(pagination: &PaginationState) -> Option<String> {
+    pagination
+        .cursors
+        .get(pagination.current + 1)
+        .cloned()
+        .flatten()
+}
+
+fn previous_cursor(pagination: &PaginationState) -> Option<String> {
+    pagination
+        .current
+        .checked_sub(1)
+        .and_then(|index| pagination.cursors.get(index))
+        .cloned()
+        .flatten()
+}
+
+fn set_cursors(pagination: &mut PaginationState, mut cursors: Vec<Option<String>>) {
+    cursors.truncate(MAX_CURSOR_HISTORY);
+    pagination.cursors = cursors;
+}
+
 impl AppState {
     pub fn get_tl_current_cursor_index(&self) -> usize {
-        if let Self::Initialized {
-            tl_current_cursor_index,
-            ..
-        } = self
-        {
-            *tl_current_cursor_index
-        } else {
-            0
-        }
+        self.model()
+            .map_or(0, |model| model.home.pagination.current)
     }
 
     pub fn set_tl_current_cursor_index(&mut self, index: usize) {
-        if let Self::Initialized {
-            tl_current_cursor_index,
-            ..
-        } = self
-        {
-            *tl_current_cursor_index = index;
+        if let Some(model) = self.model_mut() {
+            model.home.pagination.current = index;
         }
     }
 
     pub fn get_cursors(&self) -> Vec<Option<String>> {
-        if let Self::Initialized { cursors, .. } = self {
-            cursors.clone()
-        } else {
-            Vec::new()
-        }
+        self.model()
+            .map_or_else(Vec::new, |model| model.home.pagination.cursors.clone())
     }
 
-    pub fn set_cursors(&mut self, mut cursors: Vec<Option<String>>) {
-        cursors.truncate(MAX_CURSOR_HISTORY);
-        if let Self::Initialized { cursors: c, .. } = self {
-            *c = cursors;
+    pub fn set_cursors(&mut self, cursors: Vec<Option<String>>) {
+        if let Some(model) = self.model_mut() {
+            set_cursors(&mut model.home.pagination, cursors);
         }
     }
 
     pub fn get_current_cursor(&self) -> Option<String> {
-        if let Self::Initialized {
-            tl_current_cursor_index,
-            cursors,
-            ..
-        } = self
-        {
-            cursors.get(*tl_current_cursor_index).cloned().flatten()
-        } else {
-            None
-        }
+        self.model()
+            .and_then(|model| current_cursor(&model.home.pagination))
     }
 
     pub fn get_next_cursor(&self) -> Option<String> {
-        if let Self::Initialized {
-            tl_current_cursor_index,
-            cursors,
-            ..
-        } = self
-        {
-            cursors.get(*tl_current_cursor_index + 1).cloned().flatten()
-        } else {
-            None
-        }
+        self.model()
+            .and_then(|model| next_cursor(&model.home.pagination))
     }
 
     pub fn get_prev_cursor(&self) -> Option<String> {
-        if let Self::Initialized {
-            tl_current_cursor_index,
-            cursors,
-            ..
-        } = self
-        {
-            if *tl_current_cursor_index == 0 {
-                return None;
-            }
-            cursors.get(*tl_current_cursor_index - 1).cloned().flatten()
-        } else {
-            None
-        }
+        self.model()
+            .and_then(|model| previous_cursor(&model.home.pagination))
     }
 
     pub fn get_search_current_cursor_index(&self) -> usize {
-        if let Self::Initialized {
-            search_current_cursor_index,
-            ..
-        } = self
-        {
-            *search_current_cursor_index
-        } else {
-            0
-        }
+        self.model()
+            .map_or(0, |model| model.explore.pagination.current)
     }
 
     pub fn set_search_current_cursor_index(&mut self, index: usize) {
-        if let Self::Initialized {
-            search_current_cursor_index,
-            ..
-        } = self
-        {
-            *search_current_cursor_index = index;
+        if let Some(model) = self.model_mut() {
+            model.explore.pagination.current = index;
         }
     }
 
     pub fn get_search_cursors(&self) -> Vec<Option<String>> {
-        if let Self::Initialized { search_cursors, .. } = self {
-            search_cursors.clone()
-        } else {
-            Vec::new()
-        }
+        self.model()
+            .map_or_else(Vec::new, |model| model.explore.pagination.cursors.clone())
     }
 
-    pub fn set_search_cursors(&mut self, mut cursors: Vec<Option<String>>) {
-        cursors.truncate(MAX_CURSOR_HISTORY);
-        if let Self::Initialized {
-            search_cursors: c, ..
-        } = self
-        {
-            *c = cursors;
+    pub fn set_search_cursors(&mut self, cursors: Vec<Option<String>>) {
+        if let Some(model) = self.model_mut() {
+            set_cursors(&mut model.explore.pagination, cursors);
         }
     }
 
     pub fn get_search_current_cursor(&self) -> Option<String> {
-        if let Self::Initialized {
-            search_current_cursor_index,
-            search_cursors,
-            ..
-        } = self
-        {
-            search_cursors
-                .get(*search_current_cursor_index)
-                .cloned()
-                .flatten()
-        } else {
-            None
-        }
+        self.model()
+            .and_then(|model| current_cursor(&model.explore.pagination))
     }
 
     pub fn get_search_next_cursor(&self) -> Option<String> {
-        if let Self::Initialized {
-            search_current_cursor_index,
-            search_cursors,
-            ..
-        } = self
-        {
-            search_cursors
-                .get(*search_current_cursor_index + 1)
-                .cloned()
-                .flatten()
-        } else {
-            None
-        }
+        self.model()
+            .and_then(|model| next_cursor(&model.explore.pagination))
     }
 
     pub fn get_search_prev_cursor(&self) -> Option<String> {
-        if let Self::Initialized {
-            search_current_cursor_index,
-            search_cursors,
-            ..
-        } = self
-        {
-            if *search_current_cursor_index == 0 {
-                return None;
-            }
-            search_cursors
-                .get(*search_current_cursor_index - 1)
-                .cloned()
-                .flatten()
-        } else {
-            None
-        }
+        self.model()
+            .and_then(|model| previous_cursor(&model.explore.pagination))
     }
 
     pub fn get_search_query(&self) -> Option<String> {
-        if let Self::Initialized { search_query, .. } = self {
-            search_query.clone()
-        } else {
-            None
-        }
+        self.model().and_then(|model| model.explore.query.clone())
     }
 
     pub fn set_search_query(&mut self, query: Option<String>) {
-        if let Self::Initialized { search_query, .. } = self {
-            *search_query = query;
+        if let Some(model) = self.model_mut() {
+            model.explore.query = query;
         }
     }
 }

@@ -127,16 +127,11 @@ impl EffectContext {
             );
 
         let timeline = needs_timeline.then(|| {
-            let (loaded, posts) = match state {
-                AppState::Initialized { timeline, .. } => (
-                    timeline.is_some(),
-                    if needs_timeline_posts {
-                        timeline.clone().unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    },
-                ),
-                AppState::Init => (false, Vec::new()),
+            let loaded = state.has_timeline();
+            let posts = if needs_timeline_posts {
+                state.get_timeline().unwrap_or_default()
+            } else {
+                Vec::new()
             };
             TimelineEffectContext {
                 current_cursor_index: state.get_tl_current_cursor_index(),
@@ -148,13 +143,9 @@ impl EffectContext {
             }
         });
         let (profile_did, profile_section) = if needs_profile_identity {
-            match state {
-                AppState::Initialized {
-                    profile: Some(profile),
-                    ..
-                } => (Some(profile.details.did.clone()), Some(profile.section)),
-                _ => (None, None),
-            }
+            state
+                .get_profile_identity()
+                .map_or((None, None), |(did, section)| (Some(did), Some(section)))
         } else {
             (None, None)
         };
