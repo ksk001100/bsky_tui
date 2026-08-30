@@ -71,6 +71,7 @@ impl IoAsyncHandler {
             }
             IoEvent::Like => self.like().await,
             IoEvent::Repost => self.repost().await,
+            IoEvent::ToggleBookmark(post) => self.toggle_bookmark(*post).await,
             IoEvent::Reply => self.reply().await,
             IoEvent::Search(action) => self.search(action).await,
             IoEvent::SearchLike => self.search_like().await,
@@ -234,6 +235,7 @@ fn operation_name(event: &IoEvent) -> &'static str {
         IoEvent::SendPost => "Post",
         IoEvent::Like | IoEvent::SearchLike => "Like",
         IoEvent::Repost | IoEvent::SearchRepost => "Repost",
+        IoEvent::ToggleBookmark(_) => "Bookmark update",
         IoEvent::Reply | IoEvent::SearchReply => "Reply",
         IoEvent::LoadThread(_) => "Thread request",
         IoEvent::LoadInteractions(_, _, _) => "Post interactions request",

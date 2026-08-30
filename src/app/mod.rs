@@ -842,6 +842,7 @@ fn action_items(tab: Tab, has_search_results: bool) -> Vec<(&'static str, Key)> 
         ("Copy post text", Key::Char('y')),
         ("Copy post URL", Key::Char('Y')),
         ("Copy AT URI and DID", Key::Alt('y')),
+        ("Save or remove bookmark", Key::Char('b')),
         ("First item", Key::Home),
         ("Last item", Key::End),
     ];

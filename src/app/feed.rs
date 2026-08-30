@@ -1,6 +1,7 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FeedKind {
     Following,
+    Bookmarks,
     Custom(String),
     List(String),
 }
@@ -36,6 +37,17 @@ impl FeedDescriptor {
             kind: FeedKind::Custom(uri.to_owned()),
             saved: false,
             pinned: false,
+        }
+    }
+
+    pub fn bookmarks() -> Self {
+        Self {
+            id: "bookmarks".to_owned(),
+            name: "Bookmarks".to_owned(),
+            description: "Posts you saved privately".to_owned(),
+            kind: FeedKind::Bookmarks,
+            saved: true,
+            pinned: true,
         }
     }
 

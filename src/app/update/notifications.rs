@@ -61,6 +61,12 @@ impl App {
                 }
                 AppReturn::Continue
             }
+            Key::Char('b') => {
+                if let Some(post) = self.state.get_current_notification_post() {
+                    self.dispatch(IoEvent::ToggleBookmark(Box::new(post)));
+                }
+                AppReturn::Continue
+            }
             Key::Down | Key::Char('j') | Key::Ctrl('n') => {
                 self.state.move_notifications_scroll_down();
                 AppReturn::Continue

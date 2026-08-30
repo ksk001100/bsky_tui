@@ -73,6 +73,9 @@ impl App {
                 self.defer_images(image_urls);
             }
             EffectMessage::ProfileUpdated(profile) => self.state.open_profile(profile),
+            EffectMessage::BookmarkUpdated { uri, bookmarked } => {
+                self.state.set_post_bookmarked(&uri, bookmarked)
+            }
             EffectMessage::ComposerFinished => {
                 self.state.set_mode(Mode::Normal);
                 self.state.set_input(tui_input::Input::default());

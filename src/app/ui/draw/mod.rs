@@ -482,6 +482,7 @@ const HELP_ROWS: &[(&str, &str, &str)] = &[
     ("", "a", "Open author profile"),
     ("", "e / f", "Open embed / choose link or tag"),
     ("", "Ctrl+L / Ctrl+R", "Like / repost"),
+    ("", "b", "Save or remove bookmark"),
     ("", "L / R / Q", "List likes / reposts / quotes"),
     ("", "X", "Quote post"),
     ("", "m / B / !", "Mute / block / report"),
@@ -636,8 +637,18 @@ pub fn thread(state: &AppState, width: u16, accent: Color) -> List<'static> {
                             (_, Some(record)) => record.text.clone(),
                             _ => "[Post record unavailable]".to_owned(),
                         };
+                        let saved = if post
+                            .viewer
+                            .as_ref()
+                            .and_then(|viewer| viewer.bookmarked)
+                            .unwrap_or(false)
+                        {
+                            " 🔖 saved"
+                        } else {
+                            ""
+                        };
                         let mut lines = vec![format!(
-                            "{marker} {display_name} @{handle} · {}  ↩ {} 🔁 {} ❤ {}",
+                            "{marker} {display_name} @{handle} · {}  ↩ {} 🔁 {} ❤ {}{saved}",
                             post_datetime(record.as_deref()),
                             post.reply_count.unwrap_or(0),
                             post.repost_count.unwrap_or(0),
@@ -833,6 +844,19 @@ fn render_post(
         Span::styled(
             format!("   ❤ {}", post.like_count.unwrap_or(0)),
             Style::default().fg(theme::NEGATIVE),
+        ),
+        Span::styled(
+            if post
+                .viewer
+                .as_ref()
+                .and_then(|viewer| viewer.bookmarked)
+                .unwrap_or(false)
+            {
+                "   🔖 saved"
+            } else {
+                ""
+            },
+            Style::default().fg(Color::LightYellow),
         ),
     ]));
 

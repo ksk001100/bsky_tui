@@ -18,6 +18,7 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 - Follow/unfollow users and browse followers/following
 - Mute, block, and report profiles or posts with confirmation
 - Switch between Following, Discover, saved, pinned, and searched custom feeds
+- Save posts privately and browse the cursor-paginated Bookmarks feed
 - Create image, link-card, quote, and multi-post thread posts
 - Set post languages, content warnings, and reply controls
 - View post threads and reply trees
@@ -34,6 +35,9 @@ bsky_tui is a terminal-based client for Bluesky. Through a command-line interfac
 - Read and send direct messages through the dedicated Bluesky chat service
 - Manage muted words/threads, labelers, content labels, and advanced thread safety actions
 - Register and switch accounts, with configurable colors, images, dates, language, and shortcuts
+
+The supported SDK and lexicon baseline is documented in
+[`PROTOCOL_COMPATIBILITY.md`](PROTOCOL_COMPATIBILITY.md).
 
 ## Installation
 

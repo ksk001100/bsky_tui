@@ -43,6 +43,12 @@ impl App {
                 self.dispatch(IoEvent::Like);
                 AppReturn::Continue
             }
+            Key::Char('b') => {
+                if let Some(feed) = self.state.get_current_feed() {
+                    self.dispatch(IoEvent::ToggleBookmark(Box::new(feed.post.data.clone())));
+                }
+                AppReturn::Continue
+            }
             Key::Char('?') | Key::F1 => {
                 self.open_help();
                 AppReturn::Continue

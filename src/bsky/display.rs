@@ -52,8 +52,11 @@ pub fn post_attachment_alt_texts(post: &defs::PostViewData) -> Vec<String> {
 }
 
 pub fn post_embed_lines(post: &defs::PostViewData) -> Vec<String> {
-    let Some(Union::Refs(embed)) = &post.embed else {
+    let Some(embed) = &post.embed else {
         return Vec::new();
+    };
+    let Union::Refs(embed) = embed else {
+        return vec!["[Unsupported content]".to_owned()];
     };
     match embed {
         defs::PostViewEmbedRefs::AppBskyEmbedImagesView(_) => Vec::new(),

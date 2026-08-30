@@ -11,7 +11,7 @@ use bsky_sdk::BskyAgent;
 use ratatui::widgets::ListState;
 use tui_input::{Input, InputRequest};
 
-use crate::app::feed::{FeedDescriptor, FeedSnapshot};
+use crate::app::feed::{FeedDescriptor, FeedKind, FeedSnapshot};
 use crate::app::moderation::ModerationPrefs;
 use crate::app::notifications::{self, NotificationFilters, NotificationGroup};
 use crate::app::profile::{ProfileContent, ProfileSection, ProfileState};
@@ -250,6 +250,82 @@ impl AppState {
         match self {
             Self::Initialized(model) => Some(model),
             Self::Init => None,
+        }
+    }
+
+    /// Applies a server-confirmed bookmark state to every cached representation
+    /// of the post. This is deliberately called only after the XRPC succeeds.
+    pub fn set_post_bookmarked(&mut self, uri: &str, bookmarked: bool) {
+        let Some(model) = self.model_mut() else {
+            return;
+        };
+        let update = |post: &mut PostViewData| {
+            if post.uri != uri {
+                return;
+            }
+            let viewer = post.viewer.get_or_insert_with(|| {
+                atrium_api::app::bsky::feed::defs::ViewerStateData {
+                    bookmarked: None,
+                    embedding_disabled: None,
+                    like: None,
+                    pinned: None,
+                    reply_disabled: None,
+                    repost: None,
+                    thread_muted: None,
+                }
+                .into()
+            });
+            viewer.bookmarked = Some(bookmarked);
+        };
+
+        if let Some(posts) = model.home.timeline.as_mut() {
+            for feed in posts.iter_mut() {
+                update(&mut feed.post.data);
+            }
+            if !bookmarked && matches!(model.home.active_feed.kind, FeedKind::Bookmarks) {
+                posts.retain(|feed| feed.post.uri != uri);
+                let length = posts.len();
+                model.home.selection.position =
+                    model.home.selection.position.min(length.saturating_sub(1));
+                model
+                    .home
+                    .selection
+                    .list
+                    .select((length > 0).then_some(model.home.selection.position));
+            }
+        }
+        for (feed_id, snapshot) in &mut model.home.feed_snapshots {
+            if let Some(posts) = snapshot.timeline.as_mut() {
+                for feed in posts.iter_mut() {
+                    update(&mut feed.post.data);
+                }
+                if !bookmarked && feed_id == "bookmarks" {
+                    posts.retain(|feed| feed.post.uri != uri);
+                    snapshot.position = snapshot.position.min(posts.len().saturating_sub(1));
+                }
+            }
+        }
+        if let Some(posts) = model.explore.results.as_mut() {
+            for post in posts {
+                update(post);
+            }
+        }
+        for post in model.notifications.posts.values_mut() {
+            update(post);
+        }
+        if let Some(entries) = model.thread.entries.as_mut() {
+            for entry in entries {
+                if let ThreadEntry::Post { post, .. } = entry {
+                    update(post);
+                }
+            }
+        }
+        if let Some(profile) = model.profile.as_mut() {
+            if let ProfileContent::Posts(posts) = &mut profile.content {
+                for feed in posts {
+                    update(&mut feed.post.data);
+                }
+            }
         }
     }
 }

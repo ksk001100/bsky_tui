@@ -16,6 +16,7 @@ pub enum IoEvent {
     SendPost,
     Like,
     Repost,
+    ToggleBookmark(Box<atrium_api::app::bsky::feed::defs::PostViewData>),
     Reply,
     Search(SearchEvent),
     SearchLike,

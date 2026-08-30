@@ -39,6 +39,12 @@ impl App {
                 self.dispatch(IoEvent::SearchLike);
                 AppReturn::Continue
             }
+            Key::Char('b') => {
+                if let Some(post) = self.state.get_current_search_result() {
+                    self.dispatch(IoEvent::ToggleBookmark(Box::new(post)));
+                }
+                AppReturn::Continue
+            }
             Key::Char('?') | Key::F1 => {
                 self.open_help();
                 AppReturn::Continue
@@ -275,6 +281,11 @@ impl App {
                 }
             }
             Key::Char('F') => self.dispatch(IoEvent::ToggleFollow),
+            Key::Char('b') => {
+                if let Some(feed) = self.state.get_current_profile_post() {
+                    self.dispatch(IoEvent::ToggleBookmark(Box::new(feed.post.data.clone())));
+                }
+            }
             Key::Char('X') => {
                 if let Some(feed) = self.state.get_current_profile_post() {
                     self.start_quote_composer(&feed.post);
@@ -372,6 +383,11 @@ impl App {
             Key::Char('X') => {
                 if let Some(post) = self.state.get_current_thread_post() {
                     self.start_quote_composer(&post);
+                }
+            }
+            Key::Char('b') => {
+                if let Some(post) = self.state.get_current_thread_post() {
+                    self.dispatch(IoEvent::ToggleBookmark(Box::new(post)));
                 }
             }
             Key::Char('D') => {

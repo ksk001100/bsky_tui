@@ -86,6 +86,10 @@ pub enum EffectMessage {
         image_urls: Vec<String>,
     },
     ProfileUpdated(ProfileState),
+    BookmarkUpdated {
+        uri: String,
+        bookmarked: bool,
+    },
     ComposerFinished,
     NotificationsLoaded {
         notifications: Vec<Notification>,

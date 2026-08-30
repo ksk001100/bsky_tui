@@ -1,6 +1,40 @@
 //! reactions Bluesky services.
 
+use atrium_api::app::bsky::feed::defs::PostViewData;
+
 use super::*;
+
+pub async fn set_bookmark(agent: &BskyAgent, post: &PostViewData, bookmarked: bool) -> Result<()> {
+    if bookmarked {
+        agent
+            .api
+            .app
+            .bsky
+            .bookmark
+            .delete_bookmark(
+                atrium_api::app::bsky::bookmark::delete_bookmark::InputData {
+                    uri: post.uri.clone(),
+                }
+                .into(),
+            )
+            .await?;
+    } else {
+        agent
+            .api
+            .app
+            .bsky
+            .bookmark
+            .create_bookmark(
+                atrium_api::app::bsky::bookmark::create_bookmark::InputData {
+                    cid: post.cid.clone(),
+                    uri: post.uri.clone(),
+                }
+                .into(),
+            )
+            .await?;
+    }
+    Ok(())
+}
 
 pub async fn likes(agent: &BskyAgent, did: String) -> Result<repo::list_records::Output> {
     let likes = agent

@@ -3,6 +3,24 @@
 use super::*;
 
 impl IoAsyncHandler {
+    pub(super) async fn toggle_bookmark(
+        &mut self,
+        post: atrium_api::app::bsky::feed::defs::PostViewData,
+    ) -> Result<()> {
+        let bookmarked = post
+            .viewer
+            .as_ref()
+            .and_then(|viewer| viewer.bookmarked)
+            .unwrap_or(false);
+        bsky::set_bookmark(self.agent().await?.as_ref(), &post, bookmarked).await?;
+        self.emit(EffectMessage::BookmarkUpdated {
+            uri: post.uri,
+            bookmarked: !bookmarked,
+        })
+        .await;
+        Ok(())
+    }
+
     pub(super) async fn load_thread(&mut self, uri: String) -> Result<()> {
         let output = bsky::post_thread(self.agent().await?.as_ref(), uri.clone()).await?;
         let entries = crate::app::thread::flatten(&output, &uri);

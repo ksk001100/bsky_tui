@@ -34,6 +34,44 @@ pub async fn selected_feed_timeline(
                 cursor: output.cursor.clone(),
             })
         }
+        FeedKind::Bookmarks => {
+            let output = agent
+                .api
+                .app
+                .bsky
+                .bookmark
+                .get_bookmarks(
+                    atrium_api::app::bsky::bookmark::get_bookmarks::ParametersData {
+                        cursor,
+                        limit: None,
+                    }
+                    .into(),
+                )
+                .await?;
+            let feed = output
+                .bookmarks
+                .iter()
+                .filter_map(|bookmark| match &bookmark.item {
+                    Union::Refs(
+                        atrium_api::app::bsky::bookmark::defs::BookmarkViewItemRefs::AppBskyFeedDefsPostView(post),
+                    ) => Some(
+                        defs::FeedViewPostData {
+                            feed_context: None,
+                            post: (**post).clone(),
+                            reason: None,
+                            reply: None,
+                            req_id: None,
+                        }
+                        .into(),
+                    ),
+                    Union::Refs(_) | Union::Unknown(_) => None,
+                })
+                .collect();
+            Ok(TimelinePage {
+                feed,
+                cursor: output.cursor.clone(),
+            })
+        }
         FeedKind::Custom(uri) => {
             let output = agent
                 .api
@@ -117,7 +155,7 @@ pub async fn feed_catalog(agent: &BskyAgent) -> Result<Vec<FeedDescriptor>> {
         .await?
         .feeds
         .clone();
-    let mut catalog = vec![FeedDescriptor::following()];
+    let mut catalog = vec![FeedDescriptor::following(), FeedDescriptor::bookmarks()];
     let mut descriptors = generators
         .iter()
         .map(|generator| {
