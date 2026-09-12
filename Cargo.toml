@@ -15,7 +15,7 @@ eyre = "0.6"
 seahorse = "2.2"
 tokio = { version = "1", features = ["full"] }
 ratatui = { version = "0.30", features = ["all-widgets"] }
-ratatui-image = { version = "=11.0.6", default-features = false, features = ["crossterm"] }
+ratatui-image = { version = "=11.0.8", default-features = false, features = ["crossterm"] }
 atrium-api = "0.25.8"
 atrium-xrpc = "0.12"
 atrium-xrpc-client = "0.5"
